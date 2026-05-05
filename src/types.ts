@@ -3,6 +3,7 @@ export type FileEntry = {
   name: string;
   kind: "config" | "test";
   size: number;
+  tests: string[];
 };
 
 export type RunResult = {

@@ -30,6 +30,7 @@ struct FileEntry {
     name: String,
     kind: String,
     size: u64,
+    tests: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -78,6 +79,26 @@ fn is_ignored_dir(name: &str) -> bool {
     )
 }
 
+fn yaml_top_level_keys(contents: &str) -> Vec<String> {
+    contents
+        .lines()
+        .filter_map(|line| {
+            if line.starts_with(' ') || line.starts_with('\t') || line.trim_start().starts_with('#')
+            {
+                return None;
+            }
+
+            let (key, _) = line.split_once(':')?;
+            let key = key.trim();
+            if key.is_empty() || key.starts_with('-') {
+                None
+            } else {
+                Some(key.trim_matches(['"', '\'']).to_string())
+            }
+        })
+        .collect()
+}
+
 fn collect_yaml(root: &Path, dir: &Path, files: &mut Vec<FileEntry>) -> AppResult<()> {
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
@@ -111,12 +132,20 @@ fn collect_yaml(root: &Path, dir: &Path, files: &mut Vec<FileEntry>) -> AppResul
         } else {
             "test"
         };
+        let tests = if kind == "test" {
+            fs::read_to_string(&path)
+                .map(|contents| yaml_top_level_keys(&contents))
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
 
         files.push(FileEntry {
             relative_path: relative,
             name: file_name,
             kind: kind.into(),
             size: metadata.len(),
+            tests,
         });
     }
 

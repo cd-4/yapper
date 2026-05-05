@@ -1,6 +1,19 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
-  import { ChevronDown, ChevronRight, Eye, EyeOff, GripVertical, Play, Plus, Save, Trash2 } from "lucide-svelte";
+  import {
+    ChevronDown,
+    ChevronRight,
+    Eye,
+    EyeOff,
+    FileText,
+    Folder,
+    FolderOpen,
+    GripVertical,
+    Play,
+    Plus,
+    Save,
+    Trash2,
+  } from "lucide-svelte";
   import { buildTestYaml, extractReferenceCatalog, mergeCatalogs, sampleConfig } from "./yaml";
   import type { FileEntry, GitStatus, ReferenceCatalog, RunResult, StepDraft, TestDraft } from "./types";
 
@@ -19,6 +32,7 @@
   let focusedKey = "";
   let draggingStepUid = "";
   let dragOverStepUid = "";
+  let expandedTree: Record<string, boolean> = {};
   let suggestionMenu = {
     key: "",
     index: 0,
@@ -59,6 +73,7 @@
   $: filteredFiles = files.filter((file) =>
     file.relative_path.toLowerCase().includes(filter.toLowerCase()),
   );
+  $: treeRows = buildTreeRows(filteredFiles);
   $: dirty = editor !== original;
   $: generatedYaml = buildTestYaml(draft);
   $: suggestions = buildSuggestions(draft, catalog);
@@ -87,7 +102,90 @@
     files = await call<FileEntry[]>("scan_repository", { root: rootPath.trim() });
     gitStatus = await call<GitStatus>("git_status", { root: rootPath.trim() });
     await refreshCatalog();
+    expandDefaultTree();
     if (!selected && files.length > 0) await selectFile(files[0]);
+  }
+
+  type TreeRow =
+    | { type: "dir"; key: string; name: string; depth: number; expanded: boolean }
+    | { type: "file"; key: string; file: FileEntry; depth: number; expanded: boolean }
+    | { type: "test"; key: string; file: FileEntry; name: string; depth: number };
+
+  type DirectoryNode = {
+    dirs: Map<string, DirectoryNode>;
+    files: FileEntry[];
+  };
+
+  function buildTreeRows(items: FileEntry[]): TreeRow[] {
+    const root: DirectoryNode = { dirs: new Map(), files: [] };
+
+    for (const file of items) {
+      const parts = file.relative_path.split("/");
+      let node = root;
+      for (const part of parts.slice(0, -1)) {
+        if (!node.dirs.has(part)) node.dirs.set(part, { dirs: new Map(), files: [] });
+        node = node.dirs.get(part)!;
+      }
+      node.files.push(file);
+    }
+
+    const rows: TreeRow[] = [];
+    const walk = (node: DirectoryNode, depth: number, parentPath: string) => {
+      for (const [name, child] of [...node.dirs.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+        const key = parentPath ? `${parentPath}/${name}` : name;
+        const expanded = expandedTree[key] ?? true;
+        rows.push({ type: "dir", key, name, depth, expanded });
+        if (expanded) walk(child, depth + 1, key);
+      }
+
+      for (const file of [...node.files].sort((a, b) => a.name.localeCompare(b.name))) {
+        const expanded = expandedTree[file.relative_path] ?? false;
+        rows.push({ type: "file", key: file.relative_path, file, depth, expanded });
+        if (expanded) {
+          for (const testName of file.tests) {
+            rows.push({
+              type: "test",
+              key: `${file.relative_path}#${testName}`,
+              file,
+              name: testName,
+              depth: depth + 1,
+            });
+          }
+        }
+      }
+    };
+
+    walk(root, 0, "");
+    return rows;
+  }
+
+  function expandDefaultTree() {
+    const next = { ...expandedTree };
+    for (const file of files) {
+      const parts = file.relative_path.split("/");
+      let path = "";
+      for (const part of parts.slice(0, -1)) {
+        path = path ? `${path}/${part}` : part;
+        next[path] = true;
+      }
+    }
+    expandedTree = next;
+  }
+
+  function toggleTree(key: string, expanded: boolean) {
+    expandedTree = { ...expandedTree, [key]: !expanded };
+  }
+
+  async function openTreeFile(file: FileEntry) {
+    if (file.tests.length > 0) {
+      expandedTree = { ...expandedTree, [file.relative_path]: true };
+    }
+    await selectFile(file);
+  }
+
+  async function selectTest(file: FileEntry, testName: string) {
+    await selectFile(file);
+    message = `Opened ${testName} in ${file.relative_path}`;
   }
 
   async function refreshCatalog() {
@@ -489,12 +587,67 @@
 
     <input class="search" bind:value={filter} placeholder="Filter YAML files" />
 
-    <nav class="file-list" aria-label="YAML files">
-      {#each filteredFiles as file}
-        <button class:active={selected?.relative_path === file.relative_path} on:click={() => selectFile(file)}>
-          <span>{file.name}</span>
-          <small>{file.kind}</small>
-        </button>
+    <nav class="file-tree" aria-label="YAML files">
+      {#each treeRows as row (row.key)}
+        {#if row.type === "dir"}
+          <button
+            class="tree-row"
+            style:padding-left={`${row.depth * 16 + 4}px`}
+            on:click={() => toggleTree(row.key, row.expanded)}
+          >
+            {#if row.expanded}
+              <ChevronDown size={14} />
+              <FolderOpen size={15} />
+            {:else}
+              <ChevronRight size={14} />
+              <Folder size={15} />
+            {/if}
+            <span>{row.name}</span>
+          </button>
+        {:else if row.type === "file"}
+          <button
+            class="tree-row"
+            class:active={selected?.relative_path === row.file.relative_path}
+            style:padding-left={`${row.depth * 16 + 4}px`}
+            on:click={() => openTreeFile(row.file)}
+          >
+            {#if row.file.tests.length}
+              <span
+                class="tree-toggle"
+                role="button"
+                tabindex="0"
+                aria-label={row.expanded ? "Collapse file tests" : "Expand file tests"}
+                on:click|stopPropagation={() => toggleTree(row.key, row.expanded)}
+                on:keydown|stopPropagation={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    toggleTree(row.key, row.expanded);
+                  }
+                }}
+              >
+                {#if row.expanded}
+                  <ChevronDown size={14} />
+                {:else}
+                  <ChevronRight size={14} />
+                {/if}
+              </span>
+            {:else}
+              <span class="tree-spacer"></span>
+            {/if}
+            <FileText size={15} />
+            <span>{row.file.name}</span>
+            <small>{row.file.kind}</small>
+          </button>
+        {:else}
+          <button
+            class="tree-row test-row"
+            style:padding-left={`${row.depth * 16 + 22}px`}
+            on:click={() => selectTest(row.file, row.name)}
+          >
+            <span class="tree-test-dot"></span>
+            <span>{row.name}</span>
+          </button>
+        {/if}
       {/each}
     </nav>
 
