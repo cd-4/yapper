@@ -4,7 +4,7 @@
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
-  font-size: 14px;
+  font-size: 13px;
 }
 
 * {
@@ -32,8 +32,8 @@ button {
   cursor: pointer;
   display: inline-flex;
   justify-content: center;
-  min-height: 34px;
-  padding: 0 12px;
+  min-height: 30px;
+  padding: 0 10px;
 }
 
 button:hover {
@@ -53,10 +53,10 @@ button svg {
   aspect-ratio: 1;
   background: transparent;
   border-color: transparent;
-  min-height: 36px;
+  min-height: 30px;
   padding: 0;
   position: relative;
-  width: 36px;
+  width: 30px;
 }
 
 .icon-button:hover:not(:disabled) {
@@ -109,13 +109,13 @@ textarea {
 
 input,
 select {
-  height: 36px;
-  padding: 0 10px;
+  height: 32px;
+  padding: 0 8px;
 }
 
 textarea {
-  min-height: 150px;
-  padding: 10px;
+  min-height: 120px;
+  padding: 8px;
   resize: vertical;
 }
 
@@ -128,13 +128,13 @@ textarea {
 
 .shell {
   display: grid;
-  grid-template-columns: 320px 1fr;
+  grid-template-columns: 300px 1fr;
   height: 100vh;
   overflow: hidden;
 }
 
 .shell.sidebar-collapsed {
-  grid-template-columns: 74px 1fr;
+  grid-template-columns: 62px 1fr;
 }
 
 .sidebar {
@@ -145,14 +145,14 @@ textarea {
   height: 100vh;
   min-width: 0;
   overflow: hidden;
-  padding: 12px;
+  padding: 10px;
 }
 
 .sidebar-head {
   align-items: center;
   display: flex;
   flex: none;
-  gap: 8px;
+  gap: 6px;
   justify-content: space-between;
   min-width: 0;
 }
@@ -161,16 +161,16 @@ textarea {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 16px;
+  gap: 10px;
   min-height: 0;
   overflow: hidden;
-  padding-top: 16px;
+  padding-top: 10px;
 }
 
 .brand {
   align-items: center;
   display: flex;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -191,9 +191,9 @@ textarea {
   color: #ffffff;
   display: inline-flex;
   font-weight: 800;
-  height: 38px;
+  height: 32px;
   justify-content: center;
-  width: 38px;
+  width: 32px;
 }
 
 h1,
@@ -204,11 +204,11 @@ p {
 }
 
 h1 {
-  font-size: 20px;
+  font-size: 18px;
 }
 
 h2 {
-  font-size: 18px;
+  font-size: 16px;
 }
 
 h3 {
@@ -223,12 +223,12 @@ small {
 .field {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 5px;
 }
 
 .field span {
   color: #4a5563;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -249,13 +249,13 @@ small {
   gap: 2px;
   min-height: 160px;
   overflow: auto;
-  padding-top: 10px;
+  padding-top: 8px;
   position: relative;
 }
 
 .empty-tree {
   color: #647282;
-  padding: 14px 8px;
+  padding: 10px 8px;
   text-align: center;
 }
 
@@ -408,18 +408,18 @@ small {
 .workspace {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 10px;
   height: 100vh;
   min-width: 0;
   overflow: auto;
-  padding: 18px;
+  padding: 12px;
 }
 
 .topbar {
   align-items: center;
   display: flex;
   justify-content: space-between;
-  gap: 16px;
+  gap: 10px;
 }
 
 .top-actions {
@@ -450,7 +450,7 @@ small {
   background: #fff5d6;
   border: 1px solid #ead89a;
   border-radius: 6px;
-  padding: 10px 12px;
+  padding: 8px 10px;
 }
 
 .builder,
@@ -460,13 +460,13 @@ small {
   background: #ffffff;
   border: 1px solid #d4dbe2;
   border-radius: 8px;
-  padding: 14px;
+  padding: 10px;
 }
 
 .config-editor {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
 }
 
 .config-section-head {
@@ -475,7 +475,7 @@ small {
   display: flex;
   justify-content: space-between;
   gap: 8px;
-  padding-top: 12px;
+  padding-top: 8px;
 }
 
 .config-section-head:first-child {
@@ -522,20 +522,20 @@ small {
 
 .nested-step {
   background: #fbfcfd;
-  padding: 10px;
+  padding: 8px;
 }
 
 .request-line {
   display: grid;
   grid-template-columns: 110px 1fr auto;
-  gap: 10px;
+  gap: 8px;
 }
 
 .builder-head {
   align-items: end;
   display: grid;
   grid-template-columns: minmax(180px, 1fr) minmax(160px, 220px) minmax(160px, 220px) auto;
-  gap: 12px;
+  gap: 8px;
 }
 
 .step-buttons {
@@ -549,14 +549,14 @@ small {
 .steps {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-top: 14px;
+  gap: 8px;
+  margin-top: 10px;
 }
 
 .step-card {
   border: 1px solid #dbe2e8;
   border-radius: 8px;
-  padding: 12px;
+  padding: 9px;
 }
 
 .step-card.dragging {
@@ -573,7 +573,7 @@ small {
   display: grid;
   grid-template-columns: auto auto 1fr 170px auto;
   gap: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .step-title h3 {
@@ -593,7 +593,7 @@ small {
   background: #f5f7f9;
   border-radius: 6px;
   color: #536171;
-  padding: 10px 12px;
+  padding: 7px 9px;
 }
 
 .nested-step .step-summary {
@@ -603,8 +603,8 @@ small {
 .grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-  margin-top: 14px;
+  gap: 8px;
+  margin-top: 10px;
 }
 
 .reference-grid {
@@ -616,9 +616,9 @@ small {
   border-top: 1px solid #edf1f4;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 10px;
-  padding-top: 8px;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 6px;
 }
 
 .step-section.collapsed-section {
@@ -626,9 +626,9 @@ small {
 }
 
 .nested-step .step-section {
-  gap: 6px;
-  margin-top: 10px;
-  padding-top: 8px;
+  gap: 5px;
+  margin-top: 7px;
+  padding-top: 5px;
 }
 
 .nested-step .step-section.collapsed-section {
@@ -639,12 +639,12 @@ small {
   display: grid;
   grid-template-columns: auto 1fr auto;
   gap: 8px;
-  min-height: 28px;
+  min-height: 24px;
 }
 
 .section-head .icon-button {
-  min-height: 28px;
-  width: 28px;
+  min-height: 24px;
+  width: 24px;
 }
 
 .nested-step .section-head + :not(.header-row):not(.suggest-wrap):not(.grid):not(.assertion-subsection):not(.field) {
@@ -653,8 +653,8 @@ small {
 
 .section-head span {
   color: #4a5563;
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 10px;
+  font-weight: 600;
   text-transform: uppercase;
 }
 
@@ -669,7 +669,7 @@ small {
 .header-row {
   display: grid;
   grid-template-columns: minmax(160px, 240px) minmax(220px, 1fr) auto;
-  gap: 8px;
+  gap: 6px;
 }
 
 .assertion-grid {
@@ -684,19 +684,19 @@ small {
 
 .assertion-subsection,
 .assertion-body {
-  margin-top: 10px;
+  margin-top: 7px;
 }
 
 .assertion-subsection {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .assertion-subsection > span {
   color: #4a5563;
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 10px;
+  font-weight: 600;
   text-transform: uppercase;
 }
 
@@ -704,13 +704,13 @@ small {
   align-items: center;
   display: flex;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
 }
 
 .assertion-subsection-head span {
   color: #4a5563;
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 10px;
+  font-weight: 600;
   text-transform: uppercase;
 }
 
