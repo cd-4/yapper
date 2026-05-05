@@ -73,6 +73,256 @@ export function buildTestYaml(draft: TestDraft) {
   return `${lines.join("\n")}\n`;
 }
 
+const stripQuotes = (value: string) => value.trim().replace(/^["']|["']$/g, "");
+
+const yamlPair = (line: string) => {
+  const match = line.match(/^\s*-?\s*([^:]+):\s*(.*)$/);
+  if (!match) return null;
+  return { key: stripQuotes(match[1]), value: stripQuotes(match[2] || "") };
+};
+
+const lineIndent = (line: string) => line.match(/^ */)?.[0].length ?? 0;
+
+const stepDraft = (overrides: Partial<StepDraft> = {}): StepDraft => ({
+  uid: crypto.randomUUID(),
+  type: "request",
+  referenceName: "",
+  collapsed: false,
+  headersCollapsed: false,
+  bodyCollapsed: false,
+  assertionsCollapsed: false,
+  path: "",
+  method: "GET",
+  stepId: "",
+  headers: [],
+  body: "",
+  statusCode: "",
+  assertionHeaders: [],
+  responseBody: "",
+  ...overrides,
+});
+
+function normalizeBlock(lines: string[], baseIndent: number) {
+  return lines.map((line) => (lineIndent(line) >= baseIndent ? line.slice(baseIndent) : line));
+}
+
+function findTestBlock(contents: string, testName: string) {
+  const lines = contents.split("\n").map((line) => line.replace(/\t/g, "  "));
+  const target = stripQuotes(testName);
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    const pair = yamlPair(trimmed);
+    if (lineIndent(line) === 0 && pair?.key === target) {
+      const block = [];
+      for (const child of lines.slice(index + 1)) {
+        if (child.trim() && lineIndent(child) === 0) break;
+        block.push(child);
+      }
+      return normalizeBlock(block, 2);
+    }
+
+    if (lineIndent(line) === 0 && (pair?.key === "tests" || pair?.key === "test")) {
+      for (let childIndex = index + 1; childIndex < lines.length; childIndex += 1) {
+        const child = lines[childIndex];
+        if (child.trim() && lineIndent(child) === 0) break;
+        if (lineIndent(child) !== 2) continue;
+
+        const childTrimmed = child.trim();
+        const listName = childTrimmed.match(/^-\s*name:\s*(.+)$/);
+        const keyedList = childTrimmed.match(/^-\s*([^:]+):\s*$/);
+        const mapEntry = yamlPair(childTrimmed);
+        const foundName = listName?.[1] ?? keyedList?.[1] ?? (!childTrimmed.startsWith("-") ? mapEntry?.key : "");
+        if (stripQuotes(foundName || "") !== target) continue;
+
+        const block = [];
+        if (listName) block.push(child.replace(/^(\s*)-\s*/, "$1"));
+        for (const nested of lines.slice(childIndex + 1)) {
+          if (nested.trim() && lineIndent(nested) <= 2) break;
+          block.push(nested);
+        }
+        return normalizeBlock(block, keyedList ? 6 : 4);
+      }
+    }
+  }
+
+  return null;
+}
+
+type TestRange =
+  | { start: number; end: number; mode: "top" }
+  | { start: number; end: number; mode: "tests-map" }
+  | { start: number; end: number; mode: "tests-list-name" | "tests-list-key" };
+
+function findTestRange(contents: string, testName: string): TestRange | null {
+  const lines = contents.split("\n").map((line) => line.replace(/\t/g, "  "));
+  const target = stripQuotes(testName);
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    const pair = yamlPair(trimmed);
+    if (lineIndent(line) === 0 && pair?.key === target) {
+      let end = index + 1;
+      while (end < lines.length && (!lines[end].trim() || lineIndent(lines[end]) > 0)) end += 1;
+      return { start: index, end, mode: "top" };
+    }
+
+    if (lineIndent(line) === 0 && (pair?.key === "tests" || pair?.key === "test")) {
+      for (let childIndex = index + 1; childIndex < lines.length; childIndex += 1) {
+        const child = lines[childIndex];
+        if (child.trim() && lineIndent(child) === 0) break;
+        if (lineIndent(child) !== 2) continue;
+
+        const childTrimmed = child.trim();
+        const listName = childTrimmed.match(/^-\s*name:\s*(.+)$/);
+        const keyedList = childTrimmed.match(/^-\s*([^:]+):\s*$/);
+        const mapEntry = yamlPair(childTrimmed);
+        const foundName = listName?.[1] ?? keyedList?.[1] ?? (!childTrimmed.startsWith("-") ? mapEntry?.key : "");
+        if (stripQuotes(foundName || "") !== target) continue;
+
+        let end = childIndex + 1;
+        while (end < lines.length && (!lines[end].trim() || lineIndent(lines[end]) > 2)) end += 1;
+        if (listName) return { start: childIndex, end, mode: "tests-list-name" };
+        if (keyedList) return { start: childIndex, end, mode: "tests-list-key" };
+        return { start: childIndex, end, mode: "tests-map" };
+      }
+    }
+  }
+
+  return null;
+}
+
+const addIndent = (line: string, spaces: number) => `${" ".repeat(spaces)}${line}`;
+
+export function replaceTestDraft(contents: string, originalTestName: string, draft: TestDraft) {
+  const range = findTestRange(contents, originalTestName);
+  if (!range) return null;
+
+  const lines = contents.split("\n");
+  const draftLines = buildTestYaml(draft).trimEnd().split("\n");
+  let replacement: string[];
+
+  if (range.mode === "top") {
+    replacement = draftLines;
+  } else if (range.mode === "tests-list-name") {
+    replacement = [
+      `  - name: ${draft.testName.trim() || "new-api-test"}`,
+      ...draftLines.slice(1).map((line) => addIndent(line, 2)),
+    ];
+  } else if (range.mode === "tests-list-key") {
+    replacement = [
+      `  - ${draft.testName.trim() || "new-api-test"}:`,
+      ...draftLines.slice(1).map((line) => addIndent(line, 4)),
+    ];
+  } else {
+    replacement = draftLines.map((line) => addIndent(line, 2));
+  }
+
+  return `${[...lines.slice(0, range.start), ...replacement, ...lines.slice(range.end)].join("\n").trimEnd()}\n`;
+}
+
+function readNestedBlock(lines: string[], startIndex: number, baseIndent: number) {
+  const block = [];
+  for (const line of lines.slice(startIndex + 1)) {
+    if (line.trim() && lineIndent(line) <= baseIndent) break;
+    block.push(lineIndent(line) >= baseIndent + 2 ? line.slice(baseIndent + 2) : line);
+  }
+  return block.join("\n").trim();
+}
+
+function parseHeaderBlock(lines: string[], startIndex: number, baseIndent: number) {
+  const headers = [];
+  for (const line of lines.slice(startIndex + 1)) {
+    if (line.trim() && lineIndent(line) <= baseIndent) break;
+    if (lineIndent(line) !== baseIndent + 2) continue;
+    const pair = yamlPair(line.trim());
+    if (pair) headers.push({ id: crypto.randomUUID(), name: pair.key, value: pair.value });
+  }
+  return headers;
+}
+
+function parseStep(lines: string[]): StepDraft {
+  const first = yamlPair(lines[0]?.trim().replace(/^-\s*/, "") || "");
+  if (first?.key === "step-set") {
+    return stepDraft({ type: "reference", referenceName: first.value });
+  }
+
+  const step = stepDraft();
+  if (first?.key === "path") step.path = first.value;
+
+  for (let index = 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (lineIndent(line) !== 4) continue;
+    const pair = yamlPair(line.trim());
+    if (!pair) continue;
+
+    if (pair.key === "id") step.stepId = pair.value;
+    if (pair.key === "method") step.method = pair.value || "GET";
+    if (pair.key === "path") step.path = pair.value;
+    if (pair.key === "headers") step.headers = parseHeaderBlock(lines, index, 4);
+    if (pair.key === "data") step.body = readNestedBlock(lines, index, 4);
+    if (pair.key === "assert") {
+      for (let assertIndex = index + 1; assertIndex < lines.length; assertIndex += 1) {
+        const assertLine = lines[assertIndex];
+        if (assertLine.trim() && lineIndent(assertLine) <= 4) break;
+        if (lineIndent(assertLine) !== 6) continue;
+        const assertPair = yamlPair(assertLine.trim());
+        if (!assertPair) continue;
+        if (assertPair.key === "status-code") step.statusCode = assertPair.value;
+        if (assertPair.key === "headers") step.assertionHeaders = parseHeaderBlock(lines, assertIndex, 6);
+        if (assertPair.key === "body") step.responseBody = readNestedBlock(lines, assertIndex, 6);
+      }
+    }
+  }
+
+  return step;
+}
+
+export function parseTestDraft(contents: string, testName: string): TestDraft | null {
+  const block = findTestBlock(contents, testName);
+  if (!block) return null;
+
+  const draft: TestDraft = {
+    testName,
+    setupName: "",
+    cleanupName: "",
+    steps: [],
+  };
+
+  for (let index = 0; index < block.length; index += 1) {
+    const line = block[index];
+    if (lineIndent(line) !== 0) continue;
+    const pair = yamlPair(line.trim());
+    if (!pair) continue;
+
+    if (pair.key === "setup") draft.setupName = pair.value;
+    if (pair.key === "cleanup" || pair.key === "teardown") draft.cleanupName = pair.value;
+    if (pair.key === "steps") {
+      for (let stepIndex = index + 1; stepIndex < block.length; stepIndex += 1) {
+        const stepLine = block[stepIndex];
+        if (stepLine.trim() && lineIndent(stepLine) === 0) break;
+        if (lineIndent(stepLine) !== 2 || !stepLine.trim().startsWith("-")) continue;
+
+        const stepLines = [stepLine];
+        for (const nested of block.slice(stepIndex + 1)) {
+          if (nested.trim() && lineIndent(nested) <= 2) break;
+          stepLines.push(nested);
+        }
+        draft.steps.push(parseStep(stepLines));
+      }
+    }
+  }
+
+  if (draft.steps.length === 0) draft.steps.push(stepDraft({ path: "/health", statusCode: "200" }));
+  return draft;
+}
+
 export function extractReferenceCatalog(contents: string): ReferenceCatalog {
   const catalog: ReferenceCatalog = {
     vars: [],

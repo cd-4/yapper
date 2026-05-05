@@ -79,24 +79,99 @@ fn is_ignored_dir(name: &str) -> bool {
     )
 }
 
-fn yaml_top_level_keys(contents: &str) -> Vec<String> {
-    contents
-        .lines()
-        .filter_map(|line| {
-            if line.starts_with(' ') || line.starts_with('\t') || line.trim_start().starts_with('#')
-            {
-                return None;
-            }
+fn yaml_key(line: &str) -> Option<&str> {
+    let (key, _) = line.split_once(':')?;
+    let key = key.trim().trim_start_matches('-').trim();
+    if key.is_empty() {
+        None
+    } else {
+        Some(key.trim_matches(['"', '\'']))
+    }
+}
 
-            let (key, _) = line.split_once(':')?;
-            let key = key.trim();
-            if key.is_empty() || key.starts_with('-') {
-                None
-            } else {
-                Some(key.trim_matches(['"', '\'']).to_string())
-            }
+fn indentation(line: &str) -> usize {
+    line.chars().take_while(|character| *character == ' ').count()
+}
+
+fn is_config_section(key: &str) -> bool {
+    matches!(
+        key,
+        "vars" | "urls" | "step-sets" | "headers" | "auth" | "environments" | "plugins"
+    )
+}
+
+fn yaml_test_names(contents: &str) -> Vec<String> {
+    let lines: Vec<String> = contents
+        .lines()
+        .map(|line| line.replace('\t', "  "))
+        .filter(|line| {
+            let trimmed = line.trim();
+            !trimmed.is_empty() && !trimmed.starts_with('#')
         })
-        .collect()
+        .collect();
+    let mut tests = Vec::new();
+
+    for (index, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if indentation(line) != 0 || trimmed.starts_with('-') {
+            continue;
+        }
+
+        let Some(key) = yaml_key(trimmed) else {
+            continue;
+        };
+
+        if key == "tests" || key == "test" {
+            for child in lines.iter().skip(index + 1) {
+                let child_indent = indentation(child);
+                if child_indent == 0 {
+                    break;
+                }
+                if child_indent != 2 {
+                    continue;
+                }
+
+                let child_trimmed = child.trim();
+                if let Some(name) = child_trimmed
+                    .strip_prefix("- name:")
+                    .map(|value| value.trim().trim_matches(['"', '\'']))
+                    .filter(|value| !value.is_empty())
+                {
+                    tests.push(name.to_string());
+                    continue;
+                }
+
+                if let Some(name) = yaml_key(child_trimmed) {
+                    tests.push(name.to_string());
+                }
+            }
+            continue;
+        }
+
+        if is_config_section(key) {
+            continue;
+        }
+
+        let mut has_steps = false;
+        for child in lines.iter().skip(index + 1) {
+            let child_indent = indentation(child);
+            if child_indent == 0 {
+                break;
+            }
+            if child_indent == 2 && yaml_key(child.trim()) == Some("steps") {
+                has_steps = true;
+                break;
+            }
+        }
+
+        if has_steps {
+            tests.push(key.to_string());
+        }
+    }
+
+    tests.sort();
+    tests.dedup();
+    tests
 }
 
 fn collect_yaml(root: &Path, dir: &Path, files: &mut Vec<FileEntry>) -> AppResult<()> {
@@ -134,7 +209,7 @@ fn collect_yaml(root: &Path, dir: &Path, files: &mut Vec<FileEntry>) -> AppResul
         };
         let tests = if kind == "test" {
             fs::read_to_string(&path)
-                .map(|contents| yaml_top_level_keys(&contents))
+                .map(|contents| yaml_test_names(&contents))
                 .unwrap_or_default()
         } else {
             Vec::new()
@@ -226,7 +301,11 @@ step-sets:
 }
 
 #[tauri::command]
-fn run_yapitest(root: String, target: Option<String>) -> AppResult<RunResult> {
+fn run_yapitest(
+    root: String,
+    target: Option<String>,
+    test_name: Option<String>,
+) -> AppResult<RunResult> {
     let root = normalize_root(&root)?;
     let mut command = Command::new("yapitest");
     command.current_dir(&root);
@@ -237,6 +316,12 @@ fn run_yapitest(root: String, target: Option<String>) -> AppResult<RunResult> {
         command.arg(path);
         display.push(' ');
         display.push_str(&target);
+    }
+
+    if let Some(test_name) = test_name.filter(|value| !value.trim().is_empty()) {
+        command.args(["-k", &test_name]);
+        display.push_str(" -k ");
+        display.push_str(&test_name);
     }
 
     let output = command.output().map_err(|error| {
@@ -290,4 +375,80 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::yaml_test_names;
+
+    #[test]
+    fn extracts_top_level_test_blocks() {
+        let contents = r#"
+health-check:
+  steps:
+    - path: /health
+      method: GET
+
+create-user:
+  setup: login
+  steps:
+    - path: /users
+      method: POST
+"#;
+
+        assert_eq!(yaml_test_names(contents), vec!["create-user", "health-check"]);
+    }
+
+    #[test]
+    fn extracts_tests_nested_under_tests_map() {
+        let contents = r#"
+vars:
+  token: secret
+
+tests:
+  health-check:
+    steps:
+      - path: /health
+  "create-user":
+    steps:
+      - path: /users
+"#;
+
+        assert_eq!(yaml_test_names(contents), vec!["create-user", "health-check"]);
+    }
+
+    #[test]
+    fn extracts_tests_nested_under_tests_list() {
+        let contents = r#"
+tests:
+  - name: health-check
+    steps:
+      - path: /health
+  - create-user:
+      steps:
+        - path: /users
+"#;
+
+        assert_eq!(yaml_test_names(contents), vec!["create-user", "health-check"]);
+    }
+
+    #[test]
+    fn ignores_config_sections_in_test_files() {
+        let contents = r#"
+vars:
+  token: secret
+urls:
+  api: https://api.example.com
+step-sets:
+  login:
+    steps:
+      - path: /login
+
+health-check:
+  steps:
+    - path: /health
+"#;
+
+        assert_eq!(yaml_test_names(contents), vec!["health-check"]);
+    }
 }

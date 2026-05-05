@@ -9,17 +9,27 @@
     Folder,
     FolderOpen,
     GripVertical,
+    PanelLeftClose,
+    PanelLeftOpen,
     Play,
     Plus,
     Save,
     Trash2,
   } from "lucide-svelte";
-  import { buildTestYaml, extractReferenceCatalog, mergeCatalogs, sampleConfig } from "./yaml";
+  import {
+    buildTestYaml,
+    extractReferenceCatalog,
+    mergeCatalogs,
+    parseTestDraft,
+    replaceTestDraft,
+    sampleConfig,
+  } from "./yaml";
   import type { FileEntry, GitStatus, ReferenceCatalog, RunResult, StepDraft, TestDraft } from "./types";
 
   let rootPath = "";
   let files: FileEntry[] = [];
   let selected: FileEntry | null = null;
+  let selectedTestKey = "";
   let editor = "";
   let original = "";
   let output = "";
@@ -33,6 +43,8 @@
   let draggingStepUid = "";
   let dragOverStepUid = "";
   let expandedTree: Record<string, boolean> = {};
+  let sidebarCollapsed = false;
+  let editingTest: { file: FileEntry; originalName: string } | null = null;
   let suggestionMenu = {
     key: "",
     index: 0,
@@ -73,7 +85,7 @@
   $: filteredFiles = files.filter((file) =>
     file.relative_path.toLowerCase().includes(filter.toLowerCase()),
   );
-  $: treeRows = buildTreeRows(filteredFiles);
+  $: treeRows = buildTreeRows(filteredFiles, expandedTree);
   $: dirty = editor !== original;
   $: generatedYaml = buildTestYaml(draft);
   $: suggestions = buildSuggestions(draft, catalog);
@@ -116,7 +128,7 @@
     files: FileEntry[];
   };
 
-  function buildTreeRows(items: FileEntry[]): TreeRow[] {
+  function buildTreeRows(items: FileEntry[], expanded: Record<string, boolean>): TreeRow[] {
     const root: DirectoryNode = { dirs: new Map(), files: [] };
 
     for (const file of items) {
@@ -133,15 +145,15 @@
     const walk = (node: DirectoryNode, depth: number, parentPath: string) => {
       for (const [name, child] of [...node.dirs.entries()].sort(([a], [b]) => a.localeCompare(b))) {
         const key = parentPath ? `${parentPath}/${name}` : name;
-        const expanded = expandedTree[key] ?? true;
-        rows.push({ type: "dir", key, name, depth, expanded });
-        if (expanded) walk(child, depth + 1, key);
+        const isExpanded = expanded[key] ?? true;
+        rows.push({ type: "dir", key, name, depth, expanded: isExpanded });
+        if (isExpanded) walk(child, depth + 1, key);
       }
 
       for (const file of [...node.files].sort((a, b) => a.name.localeCompare(b.name))) {
-        const expanded = expandedTree[file.relative_path] ?? false;
-        rows.push({ type: "file", key: file.relative_path, file, depth, expanded });
-        if (expanded) {
+        const isExpanded = expanded[file.relative_path] ?? false;
+        rows.push({ type: "file", key: file.relative_path, file, depth, expanded: isExpanded });
+        if (isExpanded) {
           for (const testName of file.tests) {
             rows.push({
               type: "test",
@@ -184,8 +196,27 @@
   }
 
   async function selectTest(file: FileEntry, testName: string) {
-    await selectFile(file);
-    message = `Opened ${testName} in ${file.relative_path}`;
+    selected = file;
+    selectedTestKey = `${file.relative_path}#${testName}`;
+    const contents = await call<string>("read_yaml_file", {
+      root: rootPath.trim(),
+      relativePath: file.relative_path,
+    });
+    const parsed = parseTestDraft(contents, testName);
+    if (!parsed) {
+      editor = contents;
+      original = contents;
+      view = "yaml";
+      message = `Could not load ${testName} into the builder. Opened ${file.relative_path} as YAML.`;
+      return;
+    }
+
+    draft = parsed;
+    editingTest = { file, originalName: testName };
+    editor = buildTestYaml(parsed);
+    original = editor;
+    view = "builder";
+    message = `Opened ${testName} from ${file.relative_path}`;
   }
 
   async function refreshCatalog() {
@@ -203,6 +234,8 @@
 
   async function selectFile(file: FileEntry) {
     selected = file;
+    selectedTestKey = "";
+    editingTest = null;
     editor = await call<string>("read_yaml_file", {
       root: rootPath.trim(),
       relativePath: file.relative_path,
@@ -224,33 +257,56 @@
   }
 
   async function saveDraft() {
-    const relativePath = `api-tests/${draft.testName.trim() || "new-api-test"}.yaml`;
-    const activeView = view;
-    await call("write_yaml_file", {
-      root: rootPath.trim(),
-      relativePath,
-      contents: generatedYaml,
-    });
-    await scan();
-    const file = files.find((item) => item.relative_path === relativePath);
-    if (file && activeView !== "builder") {
-      selected = file;
-      editor = generatedYaml;
-      original = generatedYaml;
-    } else {
-      selected = null;
-      editor = generatedYaml;
-      original = generatedYaml;
+    if (editingTest) {
+      const contents = await call<string>("read_yaml_file", {
+        root: rootPath.trim(),
+        relativePath: editingTest.file.relative_path,
+      });
+      const updated = replaceTestDraft(contents, editingTest.originalName, draft);
+      if (!updated) {
+        message = `Could not update ${editingTest.originalName} in ${editingTest.file.relative_path}`;
+        return editingTest.file.relative_path;
+      }
+      await call("write_yaml_file", {
+        root: rootPath.trim(),
+        relativePath: editingTest.file.relative_path,
+        contents: updated,
+      });
+      const activeFilePath = editingTest.file.relative_path;
+      const currentName = draft.testName.trim() || "new-api-test";
+      await scan();
+      const file = files.find((item) => item.relative_path === activeFilePath);
+      if (file) {
+        selected = file;
+        editingTest = { file, originalName: currentName };
+      }
+      editor = buildTestYaml(draft);
+      original = editor;
+      view = "builder";
+      message = `Saved ${currentName} in ${activeFilePath}`;
+      return activeFilePath;
     }
-    view = activeView;
-    return relativePath;
+
+    message = "Select a test from an existing YAML file before saving or running it.";
+    return null;
   }
 
   function showBuilder() {
+    if (view === "builder") return;
     selected = null;
+    selectedTestKey = "";
+    editingTest = null;
     editor = generatedYaml;
     original = generatedYaml;
     view = "builder";
+  }
+
+  async function showYaml() {
+    if (editingTest) {
+      await selectFile(editingTest.file);
+      return;
+    }
+    view = "yaml";
   }
 
   async function createSampleProject() {
@@ -275,18 +331,20 @@
     if (file) await selectFile(file);
   }
 
-  async function runYapitest(target?: string) {
+  async function runYapitest(target?: string, testName?: string) {
     output = "Running yapitest...\n";
     runResult = await call<RunResult>("run_yapitest", {
       root: rootPath.trim(),
       target: target || null,
+      testName: testName || null,
     });
     output = [runResult.command, "", runResult.stdout, runResult.stderr].filter(Boolean).join("\n");
   }
 
   async function runDraft() {
     const relativePath = await saveDraft();
-    await runYapitest(relativePath);
+    if (!relativePath) return;
+    await runYapitest(relativePath, draft.testName.trim() || "new-api-test");
   }
 
   function addStep() {
@@ -561,101 +619,125 @@
   }
 </script>
 
-<main class="shell">
-  <aside class="sidebar">
-    <div class="brand">
-      <span class="mark">B</span>
-      <div>
-        <h1>Blitzen</h1>
-        <p>YAML API tests for Git repositories</p>
-      </div>
-    </div>
-
-    <label class="field">
-      <span>Repository path</span>
-      <div class="path-row">
-        <input bind:value={rootPath} placeholder="/path/to/repo" />
-        <button on:click={scan} disabled={busy}>Open</button>
-      </div>
-    </label>
-
-    <div class="actions">
-      <button on:click={createSampleProject} disabled={busy || !rootPath}>Sample</button>
-      <button on:click={newConfig} disabled={busy || !rootPath}>Config</button>
-      <button on:click={() => runYapitest()} disabled={busy || !rootPath}>Run All</button>
-    </div>
-
-    <input class="search" bind:value={filter} placeholder="Filter YAML files" />
-
-    <nav class="file-tree" aria-label="YAML files">
-      {#each treeRows as row (row.key)}
-        {#if row.type === "dir"}
-          <button
-            class="tree-row"
-            style:padding-left={`${row.depth * 16 + 4}px`}
-            on:click={() => toggleTree(row.key, row.expanded)}
-          >
-            {#if row.expanded}
-              <ChevronDown size={14} />
-              <FolderOpen size={15} />
-            {:else}
-              <ChevronRight size={14} />
-              <Folder size={15} />
-            {/if}
-            <span>{row.name}</span>
-          </button>
-        {:else if row.type === "file"}
-          <button
-            class="tree-row"
-            class:active={selected?.relative_path === row.file.relative_path}
-            style:padding-left={`${row.depth * 16 + 4}px`}
-            on:click={() => openTreeFile(row.file)}
-          >
-            {#if row.file.tests.length}
-              <span
-                class="tree-toggle"
-                role="button"
-                tabindex="0"
-                aria-label={row.expanded ? "Collapse file tests" : "Expand file tests"}
-                on:click|stopPropagation={() => toggleTree(row.key, row.expanded)}
-                on:keydown|stopPropagation={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    toggleTree(row.key, row.expanded);
-                  }
-                }}
-              >
-                {#if row.expanded}
-                  <ChevronDown size={14} />
-                {:else}
-                  <ChevronRight size={14} />
-                {/if}
-              </span>
-            {:else}
-              <span class="tree-spacer"></span>
-            {/if}
-            <FileText size={15} />
-            <span>{row.file.name}</span>
-            <small>{row.file.kind}</small>
-          </button>
-        {:else}
-          <button
-            class="tree-row test-row"
-            style:padding-left={`${row.depth * 16 + 22}px`}
-            on:click={() => selectTest(row.file, row.name)}
-          >
-            <span class="tree-test-dot"></span>
-            <span>{row.name}</span>
-          </button>
+<main class="shell" class:sidebar-collapsed={sidebarCollapsed}>
+  <aside class="sidebar" aria-label="Repository browser">
+    <div class="sidebar-head">
+      <div class="brand">
+        <span class="mark">B</span>
+        {#if !sidebarCollapsed}
+          <div>
+            <h1>Blitzen</h1>
+            <p>YAML API tests for Git repositories</p>
+          </div>
         {/if}
-      {/each}
-    </nav>
+      </div>
+      <button
+        class="icon-button"
+        on:click={() => (sidebarCollapsed = !sidebarCollapsed)}
+        aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+        title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+      >
+        {#if sidebarCollapsed}
+          <PanelLeftOpen size={18} />
+        {:else}
+          <PanelLeftClose size={18} />
+        {/if}
+      </button>
+    </div>
 
-    {#if gitStatus}
-      <section class="git">
-        <h2>Git</h2>
-        <pre>{gitStatus.available ? gitStatus.output || "Working tree clean" : "Git unavailable"}</pre>
-      </section>
+    {#if !sidebarCollapsed}
+      <div class="sidebar-body">
+        <label class="field">
+          <span>Repository path</span>
+          <div class="path-row">
+            <input bind:value={rootPath} placeholder="/path/to/repo" />
+            <button on:click={scan} disabled={busy}>Open</button>
+          </div>
+        </label>
+
+        <div class="actions">
+          <button on:click={createSampleProject} disabled={busy || !rootPath}>Sample</button>
+          <button on:click={newConfig} disabled={busy || !rootPath}>Config</button>
+          <button on:click={() => runYapitest()} disabled={busy || !rootPath}>Run All</button>
+        </div>
+
+        <input class="search" bind:value={filter} placeholder="Filter YAML files" />
+
+        <nav class="file-tree" aria-label="YAML files">
+          {#each treeRows as row (row.key)}
+            {#if row.type === "dir"}
+              <div class="tree-row" style:padding-left={`${row.depth * 16 + 4}px`}>
+                <button
+                  class="tree-toggle"
+                  aria-label={row.expanded ? "Collapse folder" : "Expand folder"}
+                  aria-expanded={row.expanded}
+                  on:click={() => toggleTree(row.key, row.expanded)}
+                >
+                  {#if row.expanded}
+                    <ChevronDown size={14} />
+                  {:else}
+                    <ChevronRight size={14} />
+                  {/if}
+                </button>
+                {#if row.expanded}
+                  <FolderOpen size={15} />
+                {:else}
+                  <Folder size={15} />
+                {/if}
+                <button class="tree-label" on:click={() => toggleTree(row.key, row.expanded)}>
+                  <span>{row.name}</span>
+                </button>
+              </div>
+            {:else if row.type === "file"}
+              <div
+                class="tree-row"
+                class:active={selected?.relative_path === row.file.relative_path && !selectedTestKey}
+                style:padding-left={`${row.depth * 16 + 4}px`}
+              >
+                {#if row.file.tests.length}
+                  <button
+                    class="tree-toggle"
+                    aria-label={row.expanded ? "Collapse file tests" : "Expand file tests"}
+                    aria-expanded={row.expanded}
+                    on:click|stopPropagation={() => toggleTree(row.key, row.expanded)}
+                  >
+                    {#if row.expanded}
+                      <ChevronDown size={14} />
+                    {:else}
+                      <ChevronRight size={14} />
+                    {/if}
+                  </button>
+                {:else}
+                  <span class="tree-spacer"></span>
+                {/if}
+                <FileText size={15} />
+                <button class="tree-label" on:click={() => openTreeFile(row.file)}>
+                  <span>{row.file.name}</span>
+                </button>
+                <small>{row.file.kind}</small>
+              </div>
+            {:else}
+              <div
+                class="tree-row test-row"
+                class:active={selectedTestKey === row.key}
+                style:padding-left={`${row.depth * 16 + 22}px`}
+              >
+                <span class="tree-test-dot"></span>
+                <button class="tree-label" on:click={() => selectTest(row.file, row.name)}>
+                  <span>{row.name}</span>
+                </button>
+              </div>
+            {/if}
+          {/each}
+        </nav>
+
+        {#if gitStatus}
+          <section class="git">
+            <h2>Git</h2>
+            <pre>{gitStatus.available ? gitStatus.output || "Working tree clean" : "Git unavailable"}</pre>
+          </section>
+        {/if}
+      </div>
     {/if}
   </aside>
 
@@ -670,7 +752,7 @@
         <button on:click={runDraft} disabled={busy || !rootPath}>Run Draft</button>
         <div class="tabs">
           <button class:active={view === "builder"} on:click={showBuilder}>Builder</button>
-          <button class:active={view === "yaml"} on:click={() => (view = "yaml")}>YAML</button>
+          <button class:active={view === "yaml"} on:click={showYaml}>YAML</button>
         </div>
       </div>
     </header>
