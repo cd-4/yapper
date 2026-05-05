@@ -388,7 +388,7 @@ small {
   margin-top: 0;
 }
 
-.headers {
+.step-section {
   border-top: 1px solid #edf1f4;
   display: flex;
   flex-direction: column;
@@ -397,10 +397,26 @@ small {
   padding-top: 12px;
 }
 
-.headers > div:first-child {
+.section-head {
   align-items: center;
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+}
+
+.section-head span {
+  color: #4a5563;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.section-head:has(> span:last-child) {
+  grid-template-columns: auto 1fr;
+}
+
+.section-head button:last-child {
+  justify-self: end;
 }
 
 .header-row {
@@ -408,6 +424,58 @@ small {
   grid-template-columns: minmax(160px, 240px) minmax(220px, 1fr) auto;
   gap: 8px;
 }
+
+.assertion-grid {
+  grid-template-columns: minmax(160px, 240px);
+  margin-top: 0;
+}
+
+.assertion-subsection,
+.assertion-body {
+  margin-top: 10px;
+}
+
+.assertion-subsection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.assertion-subsection > span {
+  color: #4a5563;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.assertion-subsection-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.assertion-subsection-head span {
+  color: #4a5563;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.step-section textarea {
+  width: 100%;
+}
+
+@supports not selector(:has(*)) {
+  .section-head {
+    display: flex;
+  }
+
+  .section-head span {
+    flex: 1;
+  }
+}
+
 
 .suggest-wrap {
   position: relative;

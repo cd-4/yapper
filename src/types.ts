@@ -28,12 +28,17 @@ export type StepDraft = {
   type: "request" | "reference";
   referenceName: string;
   collapsed: boolean;
+  headersCollapsed: boolean;
+  bodyCollapsed: boolean;
+  assertionsCollapsed: boolean;
   path: string;
   method: string;
   stepId: string;
   headers: HeaderRow[];
   body: string;
   statusCode: string;
+  assertionHeaders: HeaderRow[];
+  responseBody: string;
 };
 
 export type TestDraft = {

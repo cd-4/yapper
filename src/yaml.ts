@@ -46,7 +46,24 @@ export function buildTestYaml(draft: TestDraft) {
     }
 
     if (step.body.trim()) lines.push("      data:", indent(step.body.trim(), 8));
-    if (step.statusCode.trim()) lines.push("      assert:", `        status-code: ${step.statusCode.trim()}`);
+
+    const assertionHeaders = step.assertionHeaders.filter(
+      (header) => header.name.trim() || header.value.trim(),
+    );
+    const hasAssertions =
+      step.statusCode.trim() || assertionHeaders.length > 0 || step.responseBody.trim();
+
+    if (hasAssertions) {
+      lines.push("      assert:");
+      if (step.statusCode.trim()) lines.push(`        status-code: ${step.statusCode.trim()}`);
+      if (assertionHeaders.length > 0) {
+        lines.push("        headers:");
+        for (const header of assertionHeaders) {
+          if (header.name.trim()) lines.push(`          ${header.name.trim()}: ${yamlValue(header.value)}`);
+        }
+      }
+      if (step.responseBody.trim()) lines.push("        body:", indent(step.responseBody.trim(), 10));
+    }
   }
 
   if (validSteps(draft.steps).length === 0) {
