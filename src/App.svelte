@@ -17,14 +17,28 @@
     Trash2,
   } from "lucide-svelte";
   import {
+    buildConfigYaml,
     buildTestYaml,
     extractReferenceCatalog,
     mergeCatalogs,
+    parseConfigDraft,
     parseTestDraft,
     replaceTestDraft,
     sampleConfig,
   } from "./yaml";
-  import type { FileEntry, GitStatus, ReferenceCatalog, RunResult, StepDraft, TestDraft } from "./types";
+  import type {
+    ConfigDraft,
+    FileEntry,
+    GitStatus,
+    OutputDraft,
+    ReferenceCatalog,
+    RunResult,
+    StepDraft,
+    StepSetDraft,
+    TestDraft,
+    UrlDraft,
+    VariableDraft,
+  } from "./types";
 
   let rootPath = "";
   let files: FileEntry[] = [];
@@ -37,7 +51,7 @@
   let gitStatus: GitStatus | null = null;
   let busy = false;
   let message = "";
-  let view: "builder" | "yaml" = "builder";
+  let view: "builder" | "yaml" | "config" = "builder";
   let filter = "";
   let focusedKey = "";
   let draggingStepUid = "";
@@ -81,6 +95,7 @@
     cleanupName: "",
     steps: [newRequestStep()],
   };
+  let configDraft: ConfigDraft = { vars: [], urls: [], stepSets: [] };
 
   $: filteredFiles = files.filter((file) =>
     file.relative_path.toLowerCase().includes(filter.toLowerCase()),
@@ -88,9 +103,13 @@
   $: treeRows = buildTreeRows(filteredFiles, expandedTree);
   $: dirty = editor !== original;
   $: generatedYaml = buildTestYaml(draft);
-  $: suggestions = buildSuggestions(draft, catalog);
+  $: generatedConfigYaml = buildConfigYaml(configDraft);
+  $: suggestions = view === "config" ? buildConfigSuggestions(configDraft, catalog) : buildSuggestions(draft, catalog);
   $: if (view === "builder") {
     editor = generatedYaml;
+  }
+  $: if (view === "config") {
+    editor = generatedConfigYaml;
   }
 
   async function call<T>(name: string, args: Record<string, unknown> = {}) {
@@ -236,22 +255,30 @@
     selected = file;
     selectedTestKey = "";
     editingTest = null;
-    editor = await call<string>("read_yaml_file", {
+    const contents = await call<string>("read_yaml_file", {
       root: rootPath.trim(),
       relativePath: file.relative_path,
     });
+    editor = contents;
     original = editor;
-    view = "yaml";
+    if (file.kind === "config") {
+      configDraft = parseConfigDraft(contents);
+      view = "config";
+    } else {
+      view = "yaml";
+    }
   }
 
   async function save() {
     if (!selected) return;
+    const contents = view === "config" ? generatedConfigYaml : editor;
     await call("write_yaml_file", {
       root: rootPath.trim(),
       relativePath: selected.relative_path,
-      contents: editor,
+      contents,
     });
-    original = editor;
+    editor = contents;
+    original = contents;
     await scan();
     message = `Saved ${selected.relative_path}`;
   }
@@ -292,6 +319,10 @@
   }
 
   function showBuilder() {
+    if (selected?.kind === "config") {
+      showConfig();
+      return;
+    }
     if (view === "builder") return;
     selected = null;
     selectedTestKey = "";
@@ -307,6 +338,94 @@
       return;
     }
     view = "yaml";
+  }
+
+  function showConfig() {
+    if (!selected || selected.kind !== "config") return;
+    configDraft = parseConfigDraft(editor || original);
+    view = "config";
+  }
+
+  const newVariable = (overrides: Partial<VariableDraft> = {}): VariableDraft => ({
+    id: crypto.randomUUID(),
+    name: "",
+    env: "",
+    defaultValue: "",
+    ...overrides,
+  });
+
+  const newUrl = (overrides: Partial<UrlDraft> = {}): UrlDraft => ({
+    id: crypto.randomUUID(),
+    name: "",
+    value: "",
+    ...overrides,
+  });
+
+  const newOutput = (overrides: Partial<OutputDraft> = {}): OutputDraft => ({
+    id: crypto.randomUUID(),
+    name: "",
+    value: "",
+    ...overrides,
+  });
+
+  const newStepSet = (overrides: Partial<StepSetDraft> = {}): StepSetDraft => ({
+    id: crypto.randomUUID(),
+    name: "",
+    once: false,
+    collapsed: false,
+    steps: [newRequestStep()],
+    outputs: [],
+    ...overrides,
+  });
+
+  function addConfigVar() {
+    configDraft.vars = [...configDraft.vars, newVariable()];
+  }
+
+  function removeConfigVar(id: string) {
+    configDraft.vars = configDraft.vars.filter((item) => item.id !== id);
+  }
+
+  function addConfigUrl() {
+    configDraft.urls = [...configDraft.urls, newUrl()];
+  }
+
+  function removeConfigUrl(id: string) {
+    configDraft.urls = configDraft.urls.filter((item) => item.id !== id);
+  }
+
+  function addStepSet() {
+    configDraft.stepSets = [...configDraft.stepSets, newStepSet({ name: `step-set-${configDraft.stepSets.length + 1}` })];
+  }
+
+  function removeStepSet(id: string) {
+    configDraft.stepSets = configDraft.stepSets.filter((item) => item.id !== id);
+  }
+
+  function toggleStepSet(stepSet: StepSetDraft) {
+    stepSet.collapsed = !stepSet.collapsed;
+    configDraft.stepSets = [...configDraft.stepSets];
+  }
+
+  function addStepSetStep(stepSet: StepSetDraft) {
+    stepSet.steps = [...stepSet.steps, newRequestStep({ stepId: `step-${stepSet.steps.length + 1}` })];
+    configDraft.stepSets = [...configDraft.stepSets];
+  }
+
+  function removeStepSetStep(stepSet: StepSetDraft, uid: string) {
+    if (stepSet.steps.length === 1) return;
+    stepSet.steps = stepSet.steps.filter((step) => step.uid !== uid);
+    configDraft.stepSets = [...configDraft.stepSets];
+  }
+
+  function addStepSetOutput(stepSet: StepSetDraft) {
+    stepSet.outputs = [...stepSet.outputs, newOutput()];
+    configDraft.stepSets = [...configDraft.stepSets];
+  }
+
+  function removeStepSetOutput(stepSet: StepSetDraft, id: string) {
+    stepSet.outputs = stepSet.outputs.filter((output) => output.id !== id);
+    configDraft.stepSets = [...configDraft.stepSets];
   }
 
   async function createSampleProject() {
@@ -359,6 +478,7 @@
   function toggleStep(step: StepDraft) {
     step.collapsed = !step.collapsed;
     draft.steps = [...draft.steps];
+    configDraft.stepSets = [...configDraft.stepSets];
   }
 
   function toggleStepSection(
@@ -367,6 +487,7 @@
   ) {
     step[field] = !step[field];
     draft.steps = [...draft.steps];
+    configDraft.stepSets = [...configDraft.stepSets];
   }
 
   function moveStep(fromUid: string, toUid: string) {
@@ -407,11 +528,13 @@
   function addHeader(step: StepDraft) {
     step.headers = [...step.headers, { id: crypto.randomUUID(), name: "", value: "" }];
     draft.steps = [...draft.steps];
+    configDraft.stepSets = [...configDraft.stepSets];
   }
 
   function removeHeader(step: StepDraft, id: string) {
     step.headers = step.headers.filter((header) => header.id !== id);
     draft.steps = [...draft.steps];
+    configDraft.stepSets = [...configDraft.stepSets];
   }
 
   function addAssertionHeader(step: StepDraft) {
@@ -420,11 +543,13 @@
       { id: crypto.randomUUID(), name: "", value: "" },
     ];
     draft.steps = [...draft.steps];
+    configDraft.stepSets = [...configDraft.stepSets];
   }
 
   function removeAssertionHeader(step: StepDraft, id: string) {
     step.assertionHeaders = step.assertionHeaders.filter((header) => header.id !== id);
     draft.steps = [...draft.steps];
+    configDraft.stepSets = [...configDraft.stepSets];
   }
 
   function tokenAtCaret(value: string, caret: number) {
@@ -558,6 +683,16 @@
     restoreCaret(next.caret);
   }
 
+  function insertConfigValueSuggestion(item: { value: string }, value: string) {
+    const input = document.activeElement as HTMLInputElement | HTMLTextAreaElement | null;
+    const caret = input?.selectionStart ?? item.value.length;
+    const next = replaceToken(item.value, value, caret);
+    item.value = next.value;
+    configDraft = { ...configDraft };
+    closeSuggestions();
+    restoreCaret(next.caret);
+  }
+
   function handleSuggestionKeydown(
     event: KeyboardEvent,
     key: string,
@@ -617,6 +752,18 @@
       ...stepTokens,
     ];
   }
+
+  function buildConfigSuggestions(config: ConfigDraft, references: ReferenceCatalog) {
+    const vars = config.vars.filter((item) => item.name.trim()).map((item) => `$vars.${item.name.trim()}`);
+    const urls = config.urls.filter((item) => item.name.trim()).map((item) => `$urls.${item.name.trim()}`);
+    const outputs = config.stepSets.flatMap((stepSet) =>
+      stepSet.outputs
+        .filter((output) => stepSet.name.trim() && output.name.trim())
+        .map((output) => `$${stepSet.name.trim()}.${output.name.trim()}`),
+    );
+
+    return [...new Set([...vars, ...urls, ...outputs, ...references.vars, ...references.urls, ...references.outputs])].sort();
+  }
 </script>
 
 <main class="shell" class:sidebar-collapsed={sidebarCollapsed}>
@@ -626,7 +773,7 @@
         <span class="mark">B</span>
         {#if !sidebarCollapsed}
           <div>
-            <h1>Blitzen</h1>
+            <h1>Yapper</h1>
             <p>YAML API tests for Git repositories</p>
           </div>
         {/if}
@@ -748,10 +895,13 @@
         <p>{dirty ? "Unsaved YAML changes" : "Collections and configs are plain repository files"}</p>
       </div>
       <div class="top-actions">
+        {#if view === "config"}
+          <button on:click={save} disabled={!selected || busy}>Save Config</button>
+        {/if}
         <button on:click={() => runYapitest()} disabled={busy || !rootPath}>Run All</button>
         <button on:click={runDraft} disabled={busy || !rootPath}>Run Draft</button>
         <div class="tabs">
-          <button class:active={view === "builder"} on:click={showBuilder}>Builder</button>
+          <button class:active={view === "builder" || view === "config"} on:click={showBuilder}>Builder</button>
           <button class:active={view === "yaml"} on:click={showYaml}>YAML</button>
         </div>
       </div>
@@ -761,7 +911,520 @@
       <div class="notice">{message}</div>
     {/if}
 
-    {#if view === "builder"}
+    {#if view === "config"}
+      <section class="config-editor">
+        <div class="config-section-head">
+          <h3>Variables</h3>
+          <button class="icon-button" on:click={addConfigVar} aria-label="Add variable" title="Add variable">
+            <Plus size={18} />
+          </button>
+        </div>
+        <div class="config-rows">
+          {#each configDraft.vars as variable (variable.id)}
+            <div class="config-row variable-row">
+              <input bind:value={variable.name} placeholder="name" />
+              <input bind:value={variable.env} placeholder="ENV_VAR" />
+              <input bind:value={variable.defaultValue} placeholder="default value" />
+              <button
+                class="icon-button danger-button"
+                on:click={() => removeConfigVar(variable.id)}
+                aria-label="Remove variable"
+                title="Remove variable"
+              >
+                <Trash2 size={18} />
+              </button>
+            </div>
+          {/each}
+        </div>
+
+        <div class="config-section-head">
+          <h3>URLs</h3>
+          <button class="icon-button" on:click={addConfigUrl} aria-label="Add URL" title="Add URL">
+            <Plus size={18} />
+          </button>
+        </div>
+        <div class="config-rows">
+          {#each configDraft.urls as url (url.id)}
+            <div class="config-row url-row">
+              <input bind:value={url.name} placeholder="name" />
+              <div class="suggest-wrap">
+                <input
+                  bind:value={url.value}
+                  on:focus={(event) => updateSuggestionMenu(event, `${url.id}:config-url`)}
+                  on:click={(event) => updateSuggestionMenu(event, `${url.id}:config-url`)}
+                  on:input={(event) => updateSuggestionMenu(event, `${url.id}:config-url`)}
+                  on:keydown={(event) =>
+                    handleSuggestionKeydown(event, `${url.id}:config-url`, (suggestion) =>
+                      insertConfigValueSuggestion(url, suggestion),
+                    )}
+                  placeholder="$vars.default-url"
+                />
+                {#if suggestionMenu.key === `${url.id}:config-url`}
+                  <div
+                    class="suggestions"
+                    style:left={`${suggestionMenu.left}px`}
+                    style:top={`${suggestionMenu.top}px`}
+                  >
+                    {#each suggestionMenu.items as suggestion, suggestionIndex}
+                      <button
+                        class:active={suggestionMenu.index === suggestionIndex}
+                        on:mousedown|preventDefault={() => insertConfigValueSuggestion(url, suggestion)}
+                      >
+                        {suggestion}
+                      </button>
+                    {/each}
+                  </div>
+                {/if}
+              </div>
+              <button
+                class="icon-button danger-button"
+                on:click={() => removeConfigUrl(url.id)}
+                aria-label="Remove URL"
+                title="Remove URL"
+              >
+                <Trash2 size={18} />
+              </button>
+            </div>
+          {/each}
+        </div>
+
+        <div class="config-section-head">
+          <h3>Step Sets</h3>
+          <button class="icon-button" on:click={addStepSet} aria-label="Add step set" title="Add step set">
+            <Plus size={18} />
+          </button>
+        </div>
+        <div class="steps">
+          {#each configDraft.stepSets as stepSet (stepSet.id)}
+            <section class="step-card">
+              <div class="step-set-title">
+                <button
+                  class="icon-button"
+                  on:click={() => toggleStepSet(stepSet)}
+                  aria-label={stepSet.collapsed ? "Show step set" : "Hide step set"}
+                  title={stepSet.collapsed ? "Show step set" : "Hide step set"}
+                >
+                  {#if stepSet.collapsed}
+                    <ChevronRight size={18} />
+                  {:else}
+                    <ChevronDown size={18} />
+                  {/if}
+                </button>
+                <input bind:value={stepSet.name} placeholder="step-set-name" />
+                <label class="check-field">
+                  <input type="checkbox" bind:checked={stepSet.once} />
+                  <span>once</span>
+                </label>
+                <button class="icon-button" on:click={() => addStepSetStep(stepSet)} aria-label="Add step" title="Add step">
+                  <Plus size={18} />
+                </button>
+                <button
+                  class="icon-button danger-button"
+                  on:click={() => removeStepSet(stepSet.id)}
+                  aria-label="Remove step set"
+                  title="Remove step set"
+                >
+                  <Trash2 size={18} />
+                </button>
+              </div>
+
+              {#if stepSet.collapsed}
+                <p class="step-summary">{stepSet.steps.length} step{stepSet.steps.length === 1 ? "" : "s"}</p>
+              {:else}
+                <div class="steps">
+                  {#each stepSet.steps as step, index (step.uid)}
+                    <section class="step-card nested-step">
+                      <div class="step-title config-step-title">
+                        <button
+                          class="icon-button"
+                          on:click={() => toggleStep(step)}
+                          aria-label={step.collapsed ? "Show step" : "Hide step"}
+                          title={step.collapsed ? "Show step" : "Hide step"}
+                        >
+                          {#if step.collapsed}
+                            <EyeOff size={18} />
+                            <Eye class="hover-icon" size={18} />
+                          {:else}
+                            <Eye size={18} />
+                            <EyeOff class="hover-icon" size={18} />
+                          {/if}
+                        </button>
+                        <h3>
+                          Step {index + 1}
+                          <small>{step.type === "reference" ? step.referenceName || "Config step set" : step.stepId || step.path || "Request"}</small>
+                        </h3>
+                        <select bind:value={step.type}>
+                          <option value="request">Request</option>
+                          <option value="reference">Config step set</option>
+                        </select>
+                        <button
+                          class="icon-button danger-button"
+                          on:click={() => removeStepSetStep(stepSet, step.uid)}
+                          disabled={stepSet.steps.length === 1}
+                          aria-label="Remove step"
+                          title="Remove step"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
+
+                    {#if step.collapsed}
+                      <p class="step-summary">
+                        {step.type === "reference"
+                          ? `Runs ${step.referenceName || "a config step set"}`
+                          : `${step.method} ${step.path || "/"}`}
+                      </p>
+                    {:else if step.type === "reference"}
+                      <div class="grid reference-grid">
+                        <label class="field">
+                          <span>Step set</span>
+                          <select bind:value={step.referenceName}>
+                            <option value="">Select step set</option>
+                            {#each catalog.stepSets as catalogStepSet}
+                              <option value={catalogStepSet}>{catalogStepSet}</option>
+                            {/each}
+                          </select>
+                        </label>
+                      </div>
+                    {:else}
+                      <div class="request-line">
+                        <select bind:value={step.method}>
+                          {#each ["GET", "POST", "PUT", "PATCH", "DELETE"] as method}
+                            <option>{method}</option>
+                          {/each}
+                        </select>
+                        <div class="suggest-wrap">
+                          <input
+                            bind:value={step.path}
+                            on:focus={(event) => updateSuggestionMenu(event, `${step.uid}:config-path`)}
+                            on:click={(event) => updateSuggestionMenu(event, `${step.uid}:config-path`)}
+                            on:input={(event) => updateSuggestionMenu(event, `${step.uid}:config-path`)}
+                            on:keydown={(event) =>
+                              handleSuggestionKeydown(event, `${step.uid}:config-path`, (suggestion) =>
+                                insertStepSuggestion(step, "path", suggestion),
+                              )}
+                            placeholder="/api/resource"
+                          />
+                          {#if suggestionMenu.key === `${step.uid}:config-path`}
+                            <div
+                              class="suggestions"
+                              style:left={`${suggestionMenu.left}px`}
+                              style:top={`${suggestionMenu.top}px`}
+                            >
+                              {#each suggestionMenu.items as suggestion, suggestionIndex}
+                                <button
+                                  class:active={suggestionMenu.index === suggestionIndex}
+                                  on:mousedown|preventDefault={() => insertStepSuggestion(step, "path", suggestion)}
+                                >
+                                  {suggestion}
+                                </button>
+                              {/each}
+                            </div>
+                          {/if}
+                        </div>
+                      </div>
+                      <div class="grid">
+                        <label class="field">
+                          <span>Step id</span>
+                          <input bind:value={step.stepId} />
+                        </label>
+                      </div>
+
+                      <section class="step-section">
+                        <div class="section-head">
+                          <button
+                            class="icon-button"
+                            on:click={() => toggleStepSection(step, "headersCollapsed")}
+                            aria-label={step.headersCollapsed ? "Show headers" : "Hide headers"}
+                            title={step.headersCollapsed ? "Show headers" : "Hide headers"}
+                          >
+                            {#if step.headersCollapsed}
+                              <ChevronRight size={18} />
+                            {:else}
+                              <ChevronDown size={18} />
+                            {/if}
+                          </button>
+                          <span>Headers</span>
+                          <button
+                            class="icon-button"
+                            on:click={() => addHeader(step)}
+                            disabled={step.headersCollapsed}
+                            aria-label="Add header"
+                            title="Add header"
+                          >
+                            <Plus size={18} />
+                          </button>
+                        </div>
+                        {#if !step.headersCollapsed}
+                          {#each step.headers as header (header.id)}
+                            <div class="header-row">
+                              <input bind:value={header.name} placeholder="Name" />
+                              <div class="suggest-wrap">
+                                <input
+                                  bind:value={header.value}
+                                  on:focus={(event) => updateSuggestionMenu(event, `${header.id}:config-header`)}
+                                  on:click={(event) => updateSuggestionMenu(event, `${header.id}:config-header`)}
+                                  on:input={(event) => updateSuggestionMenu(event, `${header.id}:config-header`)}
+                                  on:keydown={(event) =>
+                                    handleSuggestionKeydown(event, `${header.id}:config-header`, (suggestion) =>
+                                      insertHeaderSuggestion(header, suggestion),
+                                    )}
+                                  placeholder="Value"
+                                />
+                                {#if suggestionMenu.key === `${header.id}:config-header`}
+                                  <div
+                                    class="suggestions"
+                                    style:left={`${suggestionMenu.left}px`}
+                                    style:top={`${suggestionMenu.top}px`}
+                                  >
+                                    {#each suggestionMenu.items as suggestion, suggestionIndex}
+                                      <button
+                                        class:active={suggestionMenu.index === suggestionIndex}
+                                        on:mousedown|preventDefault={() => insertHeaderSuggestion(header, suggestion)}
+                                      >
+                                        {suggestion}
+                                      </button>
+                                    {/each}
+                                  </div>
+                                {/if}
+                              </div>
+                              <button
+                                class="icon-button danger-button"
+                                on:click={() => removeHeader(step, header.id)}
+                                aria-label="Remove header"
+                                title="Remove header"
+                              >
+                                <Trash2 size={18} />
+                              </button>
+                            </div>
+                          {/each}
+                        {/if}
+                      </section>
+
+                      <section class="step-section">
+                        <div class="section-head">
+                          <button
+                            class="icon-button"
+                            on:click={() => toggleStepSection(step, "bodyCollapsed")}
+                            aria-label={step.bodyCollapsed ? "Show request body" : "Hide request body"}
+                            title={step.bodyCollapsed ? "Show request body" : "Hide request body"}
+                          >
+                            {#if step.bodyCollapsed}
+                              <ChevronRight size={18} />
+                            {:else}
+                              <ChevronDown size={18} />
+                            {/if}
+                          </button>
+                          <span>Request Body</span>
+                        </div>
+                        {#if !step.bodyCollapsed}
+                          <div class="suggest-wrap">
+                            <textarea
+                              bind:value={step.body}
+                              on:focus={(event) => updateSuggestionMenu(event, `${step.uid}:config-body`)}
+                              on:click={(event) => updateSuggestionMenu(event, `${step.uid}:config-body`)}
+                              on:input={(event) => updateSuggestionMenu(event, `${step.uid}:config-body`)}
+                              on:keydown={(event) =>
+                                handleSuggestionKeydown(event, `${step.uid}:config-body`, (suggestion) =>
+                                  insertStepSuggestion(step, "body", suggestion),
+                                )}
+                              spellcheck="false"
+                              placeholder="title: Example"
+                            ></textarea>
+                            {#if suggestionMenu.key === `${step.uid}:config-body`}
+                              <div
+                                class="suggestions"
+                                style:left={`${suggestionMenu.left}px`}
+                                style:top={`${suggestionMenu.top}px`}
+                              >
+                                {#each suggestionMenu.items as suggestion, suggestionIndex}
+                                  <button
+                                    class:active={suggestionMenu.index === suggestionIndex}
+                                    on:mousedown|preventDefault={() => insertStepSuggestion(step, "body", suggestion)}
+                                  >
+                                    {suggestion}
+                                  </button>
+                                {/each}
+                              </div>
+                            {/if}
+                          </div>
+                        {/if}
+                      </section>
+
+                      <section class="step-section">
+                        <div class="section-head">
+                          <button
+                            class="icon-button"
+                            on:click={() => toggleStepSection(step, "assertionsCollapsed")}
+                            aria-label={step.assertionsCollapsed ? "Show assertions" : "Hide assertions"}
+                            title={step.assertionsCollapsed ? "Show assertions" : "Hide assertions"}
+                          >
+                            {#if step.assertionsCollapsed}
+                              <ChevronRight size={18} />
+                            {:else}
+                              <ChevronDown size={18} />
+                            {/if}
+                          </button>
+                          <span>Assertions</span>
+                        </div>
+                        {#if !step.assertionsCollapsed}
+                          <div class="grid assertion-grid">
+                            <label class="field">
+                              <span>Expected status</span>
+                              <input bind:value={step.statusCode} />
+                            </label>
+                          </div>
+                          <div class="assertion-subsection">
+                            <div class="assertion-subsection-head">
+                              <span>Header Assertions</span>
+                              <button
+                                class="icon-button"
+                                on:click={() => addAssertionHeader(step)}
+                                aria-label="Add header assertion"
+                                title="Add header assertion"
+                              >
+                                <Plus size={18} />
+                              </button>
+                            </div>
+                            {#each step.assertionHeaders as header (header.id)}
+                              <div class="header-row">
+                                <input bind:value={header.name} placeholder="Name" />
+                                <div class="suggest-wrap">
+                                  <input
+                                    bind:value={header.value}
+                                    on:focus={(event) => updateSuggestionMenu(event, `${header.id}:config-assertion-header`)}
+                                    on:click={(event) => updateSuggestionMenu(event, `${header.id}:config-assertion-header`)}
+                                    on:input={(event) => updateSuggestionMenu(event, `${header.id}:config-assertion-header`)}
+                                    on:keydown={(event) =>
+                                      handleSuggestionKeydown(event, `${header.id}:config-assertion-header`, (suggestion) =>
+                                        insertHeaderSuggestion(header, suggestion),
+                                      )}
+                                    placeholder="Value"
+                                  />
+                                  {#if suggestionMenu.key === `${header.id}:config-assertion-header`}
+                                    <div
+                                      class="suggestions"
+                                      style:left={`${suggestionMenu.left}px`}
+                                      style:top={`${suggestionMenu.top}px`}
+                                    >
+                                      {#each suggestionMenu.items as suggestion, suggestionIndex}
+                                        <button
+                                          class:active={suggestionMenu.index === suggestionIndex}
+                                          on:mousedown|preventDefault={() => insertHeaderSuggestion(header, suggestion)}
+                                        >
+                                          {suggestion}
+                                        </button>
+                                      {/each}
+                                    </div>
+                                  {/if}
+                                </div>
+                                <button
+                                  class="icon-button danger-button"
+                                  on:click={() => removeAssertionHeader(step, header.id)}
+                                  aria-label="Remove header assertion"
+                                  title="Remove header assertion"
+                                >
+                                  <Trash2 size={18} />
+                                </button>
+                              </div>
+                            {/each}
+                          </div>
+                          <label class="field assertion-body">
+                            <span>Response Body Assertions</span>
+                            <div class="suggest-wrap">
+                              <textarea
+                                bind:value={step.responseBody}
+                                on:focus={(event) => updateSuggestionMenu(event, `${step.uid}:config-response-body`)}
+                                on:click={(event) => updateSuggestionMenu(event, `${step.uid}:config-response-body`)}
+                                on:input={(event) => updateSuggestionMenu(event, `${step.uid}:config-response-body`)}
+                                on:keydown={(event) =>
+                                  handleSuggestionKeydown(event, `${step.uid}:config-response-body`, (suggestion) =>
+                                    insertResponseBodySuggestion(step, suggestion),
+                                  )}
+                                spellcheck="false"
+                                placeholder={"title: Example\nid: $create-user.response.id"}
+                              ></textarea>
+                              {#if suggestionMenu.key === `${step.uid}:config-response-body`}
+                                <div
+                                  class="suggestions"
+                                  style:left={`${suggestionMenu.left}px`}
+                                  style:top={`${suggestionMenu.top}px`}
+                                >
+                                  {#each suggestionMenu.items as suggestion, suggestionIndex}
+                                    <button
+                                      class:active={suggestionMenu.index === suggestionIndex}
+                                      on:mousedown|preventDefault={() => insertResponseBodySuggestion(step, suggestion)}
+                                    >
+                                      {suggestion}
+                                    </button>
+                                  {/each}
+                                </div>
+                              {/if}
+                            </div>
+                          </label>
+                        {/if}
+                      </section>
+                    {/if}
+                    </section>
+                  {/each}
+                </div>
+
+                <section class="step-section">
+                  <div class="section-head">
+                    <span>Outputs</span>
+                    <button class="icon-button" on:click={() => addStepSetOutput(stepSet)} aria-label="Add output" title="Add output">
+                      <Plus size={18} />
+                    </button>
+                  </div>
+                  {#each stepSet.outputs as output (output.id)}
+                    <div class="header-row">
+                      <input bind:value={output.name} placeholder="name" />
+                      <div class="suggest-wrap">
+                        <input
+                          bind:value={output.value}
+                          on:focus={(event) => updateSuggestionMenu(event, `${output.id}:config-output`)}
+                          on:click={(event) => updateSuggestionMenu(event, `${output.id}:config-output`)}
+                          on:input={(event) => updateSuggestionMenu(event, `${output.id}:config-output`)}
+                          on:keydown={(event) =>
+                            handleSuggestionKeydown(event, `${output.id}:config-output`, (suggestion) =>
+                              insertConfigValueSuggestion(output, suggestion),
+                            )}
+                          placeholder="$step.response.id"
+                        />
+                        {#if suggestionMenu.key === `${output.id}:config-output`}
+                          <div
+                            class="suggestions"
+                            style:left={`${suggestionMenu.left}px`}
+                            style:top={`${suggestionMenu.top}px`}
+                          >
+                            {#each suggestionMenu.items as suggestion, suggestionIndex}
+                              <button
+                                class:active={suggestionMenu.index === suggestionIndex}
+                                on:mousedown|preventDefault={() => insertConfigValueSuggestion(output, suggestion)}
+                              >
+                                {suggestion}
+                              </button>
+                            {/each}
+                          </div>
+                        {/if}
+                      </div>
+                      <button
+                        class="icon-button danger-button"
+                        on:click={() => removeStepSetOutput(stepSet, output.id)}
+                        aria-label="Remove output"
+                        title="Remove output"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  {/each}
+                </section>
+              {/if}
+            </section>
+          {/each}
+        </div>
+      </section>
+    {:else if view === "builder"}
       <section class="builder">
         <div class="builder-head">
           <label class="field">

@@ -1,4 +1,4 @@
-import type { ReferenceCatalog, StepDraft, TestDraft } from "./types";
+import type { ConfigDraft, ReferenceCatalog, StepDraft, TestDraft } from "./types";
 
 const indent = (value: string, spaces: number) =>
   value
@@ -321,6 +321,194 @@ export function parseTestDraft(contents: string, testName: string): TestDraft | 
 
   if (draft.steps.length === 0) draft.steps.push(stepDraft({ path: "/health", statusCode: "200" }));
   return draft;
+}
+
+export function parseConfigDraft(contents: string): ConfigDraft {
+  const lines = contents.split("\n").map((line) => line.replace(/\t/g, "  "));
+  const config: ConfigDraft = { vars: [], urls: [], stepSets: [] };
+  let section = "";
+  let currentVar: ConfigDraft["vars"][number] | null = null;
+  let currentStepSet: ConfigDraft["stepSets"][number] | null = null;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const pair = yamlPair(trimmed);
+    if (!pair) continue;
+
+    if (lineIndent(line) === 0) {
+      section = pair.key;
+      currentVar = null;
+      currentStepSet = null;
+      continue;
+    }
+
+    if (section === "vars" && lineIndent(line) === 2) {
+      currentVar = {
+        id: crypto.randomUUID(),
+        name: pair.key,
+        env: "",
+        defaultValue: pair.value,
+      };
+      config.vars.push(currentVar);
+      continue;
+    }
+
+    if (section === "vars" && currentVar && lineIndent(line) === 4) {
+      if (pair.key === "env") currentVar.env = pair.value;
+      if (pair.key === "default") currentVar.defaultValue = pair.value;
+      continue;
+    }
+
+    if (section === "urls" && lineIndent(line) === 2) {
+      config.urls.push({ id: crypto.randomUUID(), name: pair.key, value: pair.value });
+      continue;
+    }
+
+    if (section === "step-sets" && lineIndent(line) === 2) {
+      currentStepSet = {
+        id: crypto.randomUUID(),
+        name: pair.key,
+        once: false,
+        collapsed: false,
+        steps: [],
+        outputs: [],
+      };
+      config.stepSets.push(currentStepSet);
+      continue;
+    }
+
+    if (section === "step-sets" && currentStepSet && lineIndent(line) === 4) {
+      if (pair.key === "once") {
+        currentStepSet.once = pair.value === "true";
+        continue;
+      }
+
+      if (pair.key === "steps") {
+        for (let stepIndex = index + 1; stepIndex < lines.length; stepIndex += 1) {
+          const stepLine = lines[stepIndex];
+          if (stepLine.trim() && lineIndent(stepLine) <= 4) break;
+          if (lineIndent(stepLine) !== 6 || !stepLine.trim().startsWith("-")) continue;
+
+          const stepLines = [stepLine.slice(4)];
+          for (const nested of lines.slice(stepIndex + 1)) {
+            if (nested.trim() && lineIndent(nested) <= 6) break;
+            stepLines.push(lineIndent(nested) >= 4 ? nested.slice(4) : nested);
+          }
+          currentStepSet.steps.push(parseStep(stepLines));
+        }
+        continue;
+      }
+
+      if (pair.key === "output") {
+        for (const outputLine of lines.slice(index + 1)) {
+          if (outputLine.trim() && lineIndent(outputLine) <= 4) break;
+          if (lineIndent(outputLine) !== 6) continue;
+          const outputPair = yamlPair(outputLine.trim());
+          if (outputPair) {
+            currentStepSet.outputs.push({
+              id: crypto.randomUUID(),
+              name: outputPair.key,
+              value: outputPair.value,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return config;
+}
+
+function stepYamlLines(step: StepDraft, baseIndent: number) {
+  const lines: string[] = [];
+  const spaces = " ".repeat(baseIndent);
+
+  if (step.type === "reference") {
+    lines.push(`${spaces}- step-set: ${step.referenceName.trim()}`);
+    return lines;
+  }
+
+  lines.push(`${spaces}- path: ${yamlValue(step.path)}`);
+  if (step.stepId.trim()) lines.push(`${spaces}  id: ${step.stepId.trim()}`);
+  lines.push(`${spaces}  method: ${step.method || "GET"}`);
+
+  const headers = step.headers.filter((header) => header.name.trim() || header.value.trim());
+  if (headers.length > 0) {
+    lines.push(`${spaces}  headers:`);
+    for (const header of headers) {
+      if (header.name.trim()) lines.push(`${spaces}    ${header.name.trim()}: ${yamlValue(header.value)}`);
+    }
+  }
+
+  if (step.body.trim()) lines.push(`${spaces}  data:`, indent(step.body.trim(), baseIndent + 4));
+
+  const assertionHeaders = step.assertionHeaders.filter(
+    (header) => header.name.trim() || header.value.trim(),
+  );
+  const hasAssertions = step.statusCode.trim() || assertionHeaders.length > 0 || step.responseBody.trim();
+  if (hasAssertions) {
+    lines.push(`${spaces}  assert:`);
+    if (step.statusCode.trim()) lines.push(`${spaces}    status-code: ${step.statusCode.trim()}`);
+    if (assertionHeaders.length > 0) {
+      lines.push(`${spaces}    headers:`);
+      for (const header of assertionHeaders) {
+        if (header.name.trim()) lines.push(`${spaces}      ${header.name.trim()}: ${yamlValue(header.value)}`);
+      }
+    }
+    if (step.responseBody.trim()) lines.push(`${spaces}    body:`, indent(step.responseBody.trim(), baseIndent + 6));
+  }
+
+  return lines;
+}
+
+export function buildConfigYaml(config: ConfigDraft) {
+  const lines: string[] = [];
+  const vars = config.vars.filter((item) => item.name.trim());
+  const urls = config.urls.filter((item) => item.name.trim());
+  const stepSets = config.stepSets.filter((item) => item.name.trim());
+
+  if (vars.length > 0) {
+    lines.push("vars:");
+    for (const variable of vars) {
+      if (variable.env.trim()) {
+        lines.push(`  ${variable.name.trim()}:`, `    env: ${yamlValue(variable.env)}`);
+        if (variable.defaultValue.trim()) lines.push(`    default: ${yamlValue(variable.defaultValue)}`);
+      } else {
+        lines.push(`  ${variable.name.trim()}: ${yamlValue(variable.defaultValue)}`);
+      }
+    }
+    lines.push("");
+  }
+
+  if (urls.length > 0) {
+    lines.push("urls:");
+    for (const url of urls) lines.push(`  ${url.name.trim()}: ${yamlValue(url.value)}`);
+    lines.push("");
+  }
+
+  if (stepSets.length > 0) {
+    lines.push("step-sets:");
+    for (const stepSet of stepSets) {
+      lines.push(`  ${stepSet.name.trim()}:`);
+      if (stepSet.once) lines.push("    once: true");
+      lines.push("    steps:");
+      const valid = validSteps(stepSet.steps);
+      for (const step of valid.length ? valid : [stepDraft({ path: "/health", statusCode: "200" })]) {
+        lines.push(...stepYamlLines(step, 6));
+      }
+      const outputs = stepSet.outputs.filter((output) => output.name.trim() || output.value.trim());
+      if (outputs.length > 0) {
+        lines.push("    output:");
+        for (const output of outputs) {
+          if (output.name.trim()) lines.push(`      ${output.name.trim()}: ${yamlValue(output.value)}`);
+        }
+      }
+    }
+  }
+
+  return `${lines.join("\n").trimEnd()}\n`;
 }
 
 export function extractReferenceCatalog(contents: string): ReferenceCatalog {

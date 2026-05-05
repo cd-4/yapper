@@ -403,12 +403,74 @@ small {
 }
 
 .builder,
+.config-editor,
 .editor-pane,
 .console {
   background: #ffffff;
   border: 1px solid #d4dbe2;
   border-radius: 8px;
   padding: 14px;
+}
+
+.config-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.config-section-head {
+  align-items: center;
+  border-top: 1px solid #edf1f4;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 12px;
+}
+
+.config-section-head:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.config-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.config-row {
+  display: grid;
+  gap: 8px;
+}
+
+.variable-row {
+  grid-template-columns: minmax(130px, 180px) minmax(140px, 220px) minmax(180px, 1fr) auto;
+}
+
+.url-row {
+  grid-template-columns: minmax(130px, 180px) minmax(220px, 1fr) auto;
+}
+
+.step-set-title {
+  align-items: center;
+  display: grid;
+  grid-template-columns: auto minmax(180px, 1fr) auto auto auto;
+  gap: 8px;
+}
+
+.check-field {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.check-field input {
+  height: auto;
+}
+
+.nested-step {
+  background: #fbfcfd;
 }
 
 .request-line {

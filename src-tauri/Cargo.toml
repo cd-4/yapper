@@ -1,12 +1,12 @@
 [package]
-name = "blitzen"
+name = "yapper"
 version = "0.1.0"
 description = "A Git-friendly yapitest API testing UI"
-authors = ["Blitzen"]
+authors = ["Yapper"]
 edition = "2021"
 
 [lib]
-name = "blitzen_lib"
+name = "yapper_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
