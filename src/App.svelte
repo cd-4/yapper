@@ -1,11 +1,14 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import { open } from "@tauri-apps/plugin-dialog";
+  import { onMount } from "svelte";
   import {
     ChevronDown,
     ChevronRight,
     FileText,
     Folder,
     FolderOpen,
+    FolderTree,
     PanelLeftClose,
     PanelLeftOpen,
     Play,
@@ -38,6 +41,7 @@
   } from "./types";
 
   let rootPath = "";
+  let projects: string[] = [];
   let files: FileEntry[] = [];
   let selected: FileEntry | null = null;
   let selectedTestKey = "";
@@ -56,6 +60,7 @@
   let expandedTree: Record<string, boolean> = {};
   let sidebarCollapsed = false;
   let editingTest: { file: FileEntry; originalName: string } | null = null;
+  let projectMenu = { path: "", left: 0, top: 0 };
   let suggestionMenu = {
     key: "",
     index: 0,
@@ -127,7 +132,24 @@
     }
   }
 
-  async function scan() {
+  onMount(() => {
+    void loadProjects();
+    const closeProjectMenu = () => (projectMenu = { path: "", left: 0, top: 0 });
+    window.addEventListener("click", closeProjectMenu);
+    return () => window.removeEventListener("click", closeProjectMenu);
+  });
+
+  async function loadProjects() {
+    projects = await call<string[]>("list_projects");
+    if (!rootPath && projects.length > 0) await loadProject(projects[projects.length - 1]);
+  }
+
+  async function loadProject(path: string) {
+    rootPath = path;
+    projectMenu = { path: "", left: 0, top: 0 };
+    selected = null;
+    selectedTestKey = "";
+    editingTest = null;
     if (!rootPath.trim()) {
       message = "Enter the path to a Git repository or API test folder.";
       return;
@@ -137,6 +159,21 @@
     await refreshCatalog();
     expandDefaultTree();
     if (!selected && files.length > 0) await selectFile(files[0]);
+  }
+
+  async function scan() {
+    await loadProject(rootPath);
+  }
+
+  async function chooseRoot() {
+    const selectedPath = await open({
+      directory: true,
+      multiple: false,
+      title: "Open repository",
+    });
+    if (typeof selectedPath !== "string") return;
+    projects = await call<string[]>("add_project", { root: selectedPath });
+    await loadProject(projects[projects.length - 1] || selectedPath);
   }
 
   type TreeRow =
@@ -188,8 +225,17 @@
       }
     };
 
-    walk(root, 0, "");
+    walk(root, 1, "");
     return rows;
+  }
+
+  function projectKey(path: string) {
+    return `project:${path}`;
+  }
+
+  function projectName(path: string) {
+    const parts = path.split(/[\\/]/).filter(Boolean);
+    return parts[parts.length - 1] || path || "Repository";
   }
 
   function expandDefaultTree() {
@@ -207,6 +253,40 @@
 
   function toggleTree(key: string, expanded: boolean) {
     expandedTree = { ...expandedTree, [key]: !expanded };
+  }
+
+  function runDirectory(path: string) {
+    void runYapitest(path);
+  }
+
+  function runFile(file: FileEntry) {
+    void runYapitest(file.relative_path);
+  }
+
+  function runTreeTest(file: FileEntry, testName: string) {
+    void runYapitest(file.relative_path, testName);
+  }
+
+  function runProject(path: string) {
+    void runYapitest(undefined, undefined, path);
+  }
+
+  function openProjectMenu(event: MouseEvent, path: string) {
+    event.preventDefault();
+    projectMenu = { path, left: event.clientX, top: event.clientY };
+  }
+
+  async function removeSavedProject(path: string) {
+    projects = await call<string[]>("remove_project", { root: path });
+    projectMenu = { path: "", left: 0, top: 0 };
+    if (rootPath === path) {
+      rootPath = "";
+      files = [];
+      selected = null;
+      selectedTestKey = "";
+      gitStatus = null;
+      if (projects.length > 0) await loadProject(projects[projects.length - 1]);
+    }
   }
 
   async function openTreeFile(file: FileEntry) {
@@ -430,10 +510,10 @@
     configDraft.stepSets = [...configDraft.stepSets];
   }
 
-  async function runYapitest(target?: string, testName?: string) {
+  async function runYapitest(target?: string, testName?: string, rootOverride?: string) {
     output = "Running yapitest...\n";
     runResult = await call<RunResult>("run_yapitest", {
-      root: rootPath.trim(),
+      root: (rootOverride || rootPath).trim(),
       target: target || null,
       testName: testName || null,
     });
@@ -782,86 +862,166 @@
 
     {#if !sidebarCollapsed}
       <div class="sidebar-body">
-        <label class="field">
-          <span>Repository path</span>
-          <div class="path-row">
-            <input bind:value={rootPath} placeholder="/path/to/repo" />
-            <button on:click={scan} disabled={busy}>Open</button>
-          </div>
-        </label>
-
-        <div class="actions">
-          <button on:click={() => runYapitest()} disabled={busy || !rootPath}>Run All</button>
-        </div>
+        <button class="open-root-button" on:click={chooseRoot} disabled={busy}>Open</button>
 
         <input class="search" bind:value={filter} placeholder="Filter YAML files" />
 
         <nav class="file-tree" aria-label="YAML files">
-          {#each treeRows as row (row.key)}
-            {#if row.type === "dir"}
-              <div class="tree-row" style:padding-left={`${row.depth * 16 + 4}px`}>
+          {#if projects.length === 0}
+            <div class="empty-tree">No Projects Found</div>
+          {:else}
+            {#each projects as project (project)}
+              {@const projectExpanded = expandedTree[projectKey(project)] ?? true}
+              <div
+                class="tree-row tree-root-row"
+                class:active={rootPath === project && !selected}
+                role="treeitem"
+                aria-selected={rootPath === project && !selected}
+                style:padding-left="4px"
+                tabindex="-1"
+                on:contextmenu={(event) => openProjectMenu(event, project)}
+              >
                 <button
                   class="tree-toggle"
-                  aria-label={row.expanded ? "Collapse folder" : "Expand folder"}
-                  aria-expanded={row.expanded}
-                  on:click={() => toggleTree(row.key, row.expanded)}
+                  aria-label={projectExpanded ? "Collapse repository" : "Expand repository"}
+                  aria-expanded={projectExpanded}
+                  on:click={() => {
+                    if (rootPath !== project) void loadProject(project);
+                    toggleTree(projectKey(project), projectExpanded);
+                  }}
                 >
-                  {#if row.expanded}
+                  {#if projectExpanded}
                     <ChevronDown size={14} />
                   {:else}
                     <ChevronRight size={14} />
                   {/if}
                 </button>
-                {#if row.expanded}
-                  <FolderOpen size={15} />
-                {:else}
-                  <Folder size={15} />
-                {/if}
-                <button class="tree-label" on:click={() => toggleTree(row.key, row.expanded)}>
-                  <span>{row.name}</span>
+                <FolderTree size={15} />
+                <button class="tree-label" on:click={() => loadProject(project)}>
+                  <span>{projectName(project)}</span>
+                </button>
+                <button
+                  class="tree-run-button"
+                  on:click|stopPropagation={() => runProject(project)}
+                  disabled={busy}
+                  aria-label="Run all tests"
+                  title="Run all tests"
+                >
+                  <Play size={14} />
                 </button>
               </div>
-            {:else if row.type === "file"}
-              <div
-                class="tree-row"
-                class:active={selected?.relative_path === row.file.relative_path && !selectedTestKey}
-                style:padding-left={`${row.depth * 16 + 4}px`}
-              >
-                {#if row.file.tests.length}
-                  <button
-                    class="tree-toggle"
-                    aria-label={row.expanded ? "Collapse file tests" : "Expand file tests"}
-                    aria-expanded={row.expanded}
-                    on:click|stopPropagation={() => toggleTree(row.key, row.expanded)}
-                  >
-                    {#if row.expanded}
-                      <ChevronDown size={14} />
-                    {:else}
-                      <ChevronRight size={14} />
-                    {/if}
-                  </button>
-                {:else}
-                  <span class="tree-spacer"></span>
-                {/if}
-                <FileText size={15} />
-                <button class="tree-label" on:click={() => openTreeFile(row.file)}>
-                  <span>{row.file.name}</span>
-                </button>
-                <small>{row.file.kind}</small>
-              </div>
-            {:else}
-              <div
-                class="tree-row test-row"
-                class:active={selectedTestKey === row.key}
-                style:padding-left={`${row.depth * 16 + 22}px`}
-              >
-                <span class="tree-test-dot"></span>
-                <button class="tree-label" on:click={() => selectTest(row.file, row.name)}>
-                  <span>{row.name}</span>
-                </button>
-              </div>
-            {/if}
-          {/each}
+
+              {#if rootPath === project && projectExpanded}
+                {#each treeRows as row (row.key)}
+                  {#if row.type === "dir"}
+                    <div class="tree-row" style:padding-left={`${row.depth * 16 + 4}px`}>
+                      <button
+                        class="tree-toggle"
+                        aria-label={row.expanded ? "Collapse folder" : "Expand folder"}
+                        aria-expanded={row.expanded}
+                        on:click={() => toggleTree(row.key, row.expanded)}
+                      >
+                        {#if row.expanded}
+                          <ChevronDown size={14} />
+                        {:else}
+                          <ChevronRight size={14} />
+                        {/if}
+                      </button>
+                      {#if row.expanded}
+                        <FolderOpen size={15} />
+                      {:else}
+                        <Folder size={15} />
+                      {/if}
+                      <button class="tree-label" on:click={() => toggleTree(row.key, row.expanded)}>
+                        <span>{row.name}</span>
+                      </button>
+                      <button
+                        class="tree-run-button"
+                        on:click|stopPropagation={() => runDirectory(row.key)}
+                        disabled={busy || !rootPath}
+                        aria-label={`Run tests in ${row.name}`}
+                        title={`Run tests in ${row.name}`}
+                      >
+                        <Play size={14} />
+                      </button>
+                    </div>
+                  {:else if row.type === "file"}
+                    <div
+                      class="tree-row"
+                      class:active={selected?.relative_path === row.file.relative_path && !selectedTestKey}
+                      style:padding-left={`${row.depth * 16 + 4}px`}
+                    >
+                      {#if row.file.tests.length}
+                        <button
+                          class="tree-toggle"
+                          aria-label={row.expanded ? "Collapse file tests" : "Expand file tests"}
+                          aria-expanded={row.expanded}
+                          on:click|stopPropagation={() => toggleTree(row.key, row.expanded)}
+                        >
+                          {#if row.expanded}
+                            <ChevronDown size={14} />
+                          {:else}
+                            <ChevronRight size={14} />
+                          {/if}
+                        </button>
+                      {:else}
+                        <span class="tree-spacer"></span>
+                      {/if}
+                      <FileText size={15} />
+                      <button class="tree-label" on:click={() => openTreeFile(row.file)}>
+                        <span>{row.file.name}</span>
+                      </button>
+                      <small>{row.file.kind}</small>
+                      {#if row.file.kind === "test"}
+                        <button
+                          class="tree-run-button"
+                          on:click|stopPropagation={() => runFile(row.file)}
+                          disabled={busy || !rootPath}
+                          aria-label={`Run ${row.file.name}`}
+                          title={`Run ${row.file.name}`}
+                        >
+                          <Play size={14} />
+                        </button>
+                      {/if}
+                    </div>
+                  {:else}
+                    <div
+                      class="tree-row test-row"
+                      class:active={selectedTestKey === row.key}
+                      style:padding-left={`${row.depth * 16 + 22}px`}
+                    >
+                      <span class="tree-test-dot"></span>
+                      <button class="tree-label" on:click={() => selectTest(row.file, row.name)}>
+                        <span>{row.name}</span>
+                      </button>
+                      <button
+                        class="tree-run-button"
+                        on:click|stopPropagation={() => runTreeTest(row.file, row.name)}
+                        disabled={busy || !rootPath}
+                        aria-label={`Run ${row.name}`}
+                        title={`Run ${row.name}`}
+                      >
+                        <Play size={14} />
+                      </button>
+                    </div>
+                  {/if}
+                {/each}
+              {/if}
+            {/each}
+          {/if}
+          {#if projectMenu.path}
+            <div
+              class="project-menu"
+              role="menu"
+              style:left={`${projectMenu.left}px`}
+              style:top={`${projectMenu.top}px`}
+              tabindex="-1"
+              on:click|stopPropagation
+              on:keydown|stopPropagation
+            >
+              <button role="menuitem" on:click={() => removeSavedProject(projectMenu.path)}>Remove</button>
+            </div>
+          {/if}
         </nav>
 
         {#if gitStatus}
@@ -884,7 +1044,6 @@
         {#if view === "config"}
           <button on:click={save} disabled={!selected || busy}>Save Config</button>
         {/if}
-        <button on:click={() => runYapitest()} disabled={busy || !rootPath}>Run All</button>
         <button on:click={runDraft} disabled={busy || !rootPath}>Run Draft</button>
         <div class="tabs">
           <button class:active={view === "builder" || view === "config"} on:click={showBuilder}>Builder</button>

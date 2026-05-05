@@ -233,19 +233,8 @@ small {
   text-transform: uppercase;
 }
 
-.path-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px;
-}
-
-.actions {
-  display: flex;
-  gap: 8px;
-}
-
-.actions button {
-  flex: 1;
+.open-root-button {
+  width: 100%;
 }
 
 .search {
@@ -261,6 +250,13 @@ small {
   min-height: 160px;
   overflow: auto;
   padding-top: 10px;
+  position: relative;
+}
+
+.empty-tree {
+  color: #647282;
+  padding: 14px 8px;
+  text-align: center;
 }
 
 .tree-row {
@@ -273,6 +269,10 @@ small {
   padding-right: 8px;
   text-align: left;
   width: 100%;
+}
+
+.tree-root-row {
+  font-weight: 700;
 }
 
 .tree-label {
@@ -299,6 +299,54 @@ small {
 
 .tree-row small {
   flex: none;
+}
+
+.tree-run-button {
+  align-items: center;
+  background: transparent;
+  border-color: transparent;
+  color: #7a8795;
+  display: inline-flex;
+  flex: none;
+  min-height: 26px;
+  opacity: 0;
+  padding: 0;
+  pointer-events: none;
+  width: 26px;
+}
+
+.tree-row:hover .tree-run-button,
+.tree-run-button:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.tree-run-button:hover:not(:disabled),
+.tree-run-button:focus-visible:not(:disabled) {
+  background: #e0f3e6;
+  color: #18723a;
+}
+
+.project-menu {
+  background: #ffffff;
+  border: 1px solid #c7ced6;
+  border-radius: 6px;
+  box-shadow: 0 10px 22px rgba(23, 32, 43, 0.16);
+  padding: 4px;
+  position: fixed;
+  z-index: 20;
+}
+
+.project-menu button {
+  background: transparent;
+  border-color: transparent;
+  justify-content: flex-start;
+  min-width: 120px;
+}
+
+.project-menu button:hover {
+  background: #f9e0dc;
+  color: #b42318;
 }
 
 .tree-row.active {
