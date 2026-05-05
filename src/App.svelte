@@ -17,7 +17,6 @@
   let view: "builder" | "yaml" = "builder";
   let filter = "";
   let focusedKey = "";
-  let previewCollapsed = false;
   let draggingStepUid = "";
   let dragOverStepUid = "";
   let suggestionMenu = {
@@ -588,7 +587,15 @@
                   <option value="request">Request</option>
                   <option value="reference">Config step set</option>
                 </select>
-                <button on:click={() => removeStep(step.uid)} disabled={draft.steps.length === 1}>Remove</button>
+                <button
+                  class="icon-button danger-button"
+                  on:click={() => removeStep(step.uid)}
+                  disabled={draft.steps.length === 1}
+                  aria-label="Remove step"
+                  title="Remove step"
+                >
+                  <Trash2 size={18} />
+                </button>
               </div>
 
               {#if step.collapsed}
@@ -745,17 +752,6 @@
           {/each}
         </div>
 
-        <section class="preview" class:collapsed={previewCollapsed}>
-          <div class="preview-head">
-            <h3>Generated yapitest file</h3>
-            <button on:click={() => (previewCollapsed = !previewCollapsed)}>
-              {previewCollapsed ? "Show" : "Hide"}
-            </button>
-          </div>
-          {#if !previewCollapsed}
-            <pre>{generatedYaml}</pre>
-          {/if}
-        </section>
       </section>
     {:else}
       <section class="editor-pane">

@@ -459,13 +459,6 @@ small {
   margin-top: 14px;
 }
 
-.preview {
-  border-top: 1px solid #e1e6eb;
-  margin-top: 14px;
-  padding-top: 14px;
-}
-
-.preview-head,
 .console > div,
 .editor-actions {
   align-items: center;
@@ -474,7 +467,6 @@ small {
   justify-content: space-between;
 }
 
-.preview pre,
 .console pre {
   background: #18232f;
   border-radius: 6px;
@@ -482,10 +474,6 @@ small {
   overflow: auto;
   padding: 12px;
   white-space: pre-wrap;
-}
-
-.preview.collapsed {
-  padding-bottom: 14px;
 }
 
 .editor-actions {
