@@ -32,6 +32,11 @@ export type StepDraft = {
   headersCollapsed: boolean;
   bodyCollapsed: boolean;
   assertionsCollapsed: boolean;
+  optionsCollapsed: boolean;
+  url: string;
+  waitBefore: string;
+  waitAfter: string;
+  retry: string;
   path: string;
   method: string;
   stepId: string;

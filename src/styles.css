@@ -240,9 +240,12 @@ small {
 }
 
 .actions {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  display: flex;
   gap: 8px;
+}
+
+.actions button {
+  flex: 1;
 }
 
 .search {
@@ -471,6 +474,7 @@ small {
 
 .nested-step {
   background: #fbfcfd;
+  padding: 10px;
 }
 
 .request-line {
@@ -544,6 +548,10 @@ small {
   padding: 10px 12px;
 }
 
+.nested-step .step-summary {
+  padding: 7px 10px;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -561,8 +569,21 @@ small {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: 14px;
-  padding-top: 12px;
+  margin-top: 10px;
+  padding-top: 8px;
+}
+
+.step-section.collapsed-section {
+  gap: 0;
+}
+
+.nested-step .step-section {
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 8px;
+}
+
+.nested-step .step-section.collapsed-section {
 }
 
 .section-head {
@@ -570,6 +591,16 @@ small {
   display: grid;
   grid-template-columns: auto 1fr auto;
   gap: 8px;
+  min-height: 28px;
+}
+
+.section-head .icon-button {
+  min-height: 28px;
+  width: 28px;
+}
+
+.nested-step .section-head + :not(.header-row):not(.suggest-wrap):not(.grid):not(.assertion-subsection):not(.field) {
+  margin-top: 0;
 }
 
 .section-head span {
@@ -595,6 +626,11 @@ small {
 
 .assertion-grid {
   grid-template-columns: minmax(160px, 240px);
+  margin-top: 0;
+}
+
+.step-options-grid {
+  grid-template-columns: minmax(220px, 1fr) repeat(3, minmax(110px, 150px));
   margin-top: 0;
 }
 

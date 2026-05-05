@@ -37,6 +37,10 @@ export function buildTestYaml(draft: TestDraft) {
     lines.push(`    - path: ${yamlValue(step.path)}`);
     if (step.stepId.trim()) lines.push(`      id: ${step.stepId.trim()}`);
     lines.push(`      method: ${step.method || "GET"}`);
+    if (step.url.trim()) lines.push(`      url: ${yamlValue(step.url)}`);
+    if (step.waitBefore.trim()) lines.push(`      wait-before: ${step.waitBefore.trim()}`);
+    if (step.waitAfter.trim()) lines.push(`      wait-after: ${step.waitAfter.trim()}`);
+    if (step.retry.trim()) lines.push(`      retry: ${step.retry.trim()}`);
 
     if (headers.length > 0) {
       lines.push("      headers:");
@@ -91,6 +95,11 @@ const stepDraft = (overrides: Partial<StepDraft> = {}): StepDraft => ({
   headersCollapsed: false,
   bodyCollapsed: false,
   assertionsCollapsed: false,
+  optionsCollapsed: false,
+  url: "",
+  waitBefore: "",
+  waitAfter: "",
+  retry: "",
   path: "",
   method: "GET",
   stepId: "",
@@ -264,6 +273,10 @@ function parseStep(lines: string[]): StepDraft {
 
     if (pair.key === "id") step.stepId = pair.value;
     if (pair.key === "method") step.method = pair.value || "GET";
+    if (pair.key === "url") step.url = pair.value;
+    if (pair.key === "wait-before") step.waitBefore = pair.value;
+    if (pair.key === "wait-after") step.waitAfter = pair.value;
+    if (pair.key === "retry") step.retry = pair.value;
     if (pair.key === "path") step.path = pair.value;
     if (pair.key === "headers") step.headers = parseHeaderBlock(lines, index, 4);
     if (pair.key === "data") step.body = readNestedBlock(lines, index, 4);
@@ -433,6 +446,10 @@ function stepYamlLines(step: StepDraft, baseIndent: number) {
   lines.push(`${spaces}- path: ${yamlValue(step.path)}`);
   if (step.stepId.trim()) lines.push(`${spaces}  id: ${step.stepId.trim()}`);
   lines.push(`${spaces}  method: ${step.method || "GET"}`);
+  if (step.url.trim()) lines.push(`${spaces}  url: ${yamlValue(step.url)}`);
+  if (step.waitBefore.trim()) lines.push(`${spaces}  wait-before: ${step.waitBefore.trim()}`);
+  if (step.waitAfter.trim()) lines.push(`${spaces}  wait-after: ${step.waitAfter.trim()}`);
+  if (step.retry.trim()) lines.push(`${spaces}  retry: ${step.retry.trim()}`);
 
   const headers = step.headers.filter((header) => header.name.trim() || header.value.trim());
   if (headers.length > 0) {
@@ -568,32 +585,3 @@ function dedupeCatalog(catalog: ReferenceCatalog): ReferenceCatalog {
     outputs: [...new Set(catalog.outputs)].sort(),
   };
 }
-
-export const sampleConfig = `vars:
-  default-url:
-    env: BASE_URL
-    default: https://api.example.com
-  api-token:
-    env: API_TOKEN
-    default: replace-me
-
-urls:
-  base: $vars.default-url
-
-step-sets:
-  create-user:
-    once: true
-    steps:
-      - id: create-user
-        path: /api/users
-        method: POST
-        headers:
-          Authorization: Bearer $vars.api-token
-        data:
-          name: Test User
-        assert:
-          status-code: 201
-    output:
-      token: $create-user.response.token
-      user-id: $create-user.response.id
-`;

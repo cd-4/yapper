@@ -3,12 +3,9 @@
   import {
     ChevronDown,
     ChevronRight,
-    Eye,
-    EyeOff,
     FileText,
     Folder,
     FolderOpen,
-    GripVertical,
     PanelLeftClose,
     PanelLeftOpen,
     Play,
@@ -16,6 +13,7 @@
     Save,
     Trash2,
   } from "lucide-svelte";
+  import StepEditor from "./StepEditor.svelte";
   import {
     buildConfigYaml,
     buildTestYaml,
@@ -24,7 +22,6 @@
     parseConfigDraft,
     parseTestDraft,
     replaceTestDraft,
-    sampleConfig,
   } from "./yaml";
   import type {
     ConfigDraft,
@@ -78,6 +75,11 @@
     headersCollapsed: false,
     bodyCollapsed: false,
     assertionsCollapsed: false,
+    optionsCollapsed: false,
+    url: "",
+    waitBefore: "",
+    waitAfter: "",
+    retry: "",
     path: "/health",
     method: "GET",
     stepId: "health",
@@ -428,28 +430,6 @@
     configDraft.stepSets = [...configDraft.stepSets];
   }
 
-  async function createSampleProject() {
-    if (!rootPath.trim()) {
-      message = "Enter a repository path first.";
-      return;
-    }
-    await call("create_sample_project", { root: rootPath.trim() });
-    await scan();
-    message = "Created api-tests/config.yaml and api-tests/health.yaml";
-  }
-
-  async function newConfig() {
-    const relativePath = "api-tests/config.yaml";
-    await call("write_yaml_file", {
-      root: rootPath.trim(),
-      relativePath,
-      contents: sampleConfig,
-    });
-    await scan();
-    const file = files.find((item) => item.relative_path === relativePath);
-    if (file) await selectFile(file);
-  }
-
   async function runYapitest(target?: string, testName?: string) {
     output = "Running yapitest...\n";
     runResult = await call<RunResult>("run_yapitest", {
@@ -464,6 +444,14 @@
     const relativePath = await saveDraft();
     if (!relativePath) return;
     await runYapitest(relativePath, draft.testName.trim() || "new-api-test");
+  }
+
+  function touchDraft() {
+    draft.steps = [...draft.steps];
+  }
+
+  function touchConfigDraft() {
+    configDraft.stepSets = [...configDraft.stepSets];
   }
 
   function addStep() {
@@ -483,7 +471,7 @@
 
   function toggleStepSection(
     step: StepDraft,
-    field: "headersCollapsed" | "bodyCollapsed" | "assertionsCollapsed",
+    field: "headersCollapsed" | "bodyCollapsed" | "assertionsCollapsed" | "optionsCollapsed",
   ) {
     step[field] = !step[field];
     draft.steps = [...draft.steps];
@@ -653,7 +641,7 @@
     });
   }
 
-  function insertStepSuggestion(step: StepDraft, field: "path" | "body", value: string) {
+  function insertStepSuggestion(step: StepDraft, field: "path" | "body" | "url", value: string) {
     const input = document.activeElement as HTMLInputElement | HTMLTextAreaElement | null;
     const caret = input?.selectionStart ?? step[field].length;
     const next = replaceToken(step[field], value, caret);
@@ -803,8 +791,6 @@
         </label>
 
         <div class="actions">
-          <button on:click={createSampleProject} disabled={busy || !rootPath}>Sample</button>
-          <button on:click={newConfig} disabled={busy || !rootPath}>Config</button>
           <button on:click={() => runYapitest()} disabled={busy || !rootPath}>Run All</button>
         </div>
 
@@ -1033,339 +1019,28 @@
               {:else}
                 <div class="steps">
                   {#each stepSet.steps as step, index (step.uid)}
-                    <section class="step-card nested-step">
-                      <div class="step-title config-step-title">
-                        <button
-                          class="icon-button"
-                          on:click={() => toggleStep(step)}
-                          aria-label={step.collapsed ? "Show step" : "Hide step"}
-                          title={step.collapsed ? "Show step" : "Hide step"}
-                        >
-                          {#if step.collapsed}
-                            <EyeOff size={18} />
-                            <Eye class="hover-icon" size={18} />
-                          {:else}
-                            <Eye size={18} />
-                            <EyeOff class="hover-icon" size={18} />
-                          {/if}
-                        </button>
-                        <h3>
-                          Step {index + 1}
-                          <small>{step.type === "reference" ? step.referenceName || "Config step set" : step.stepId || step.path || "Request"}</small>
-                        </h3>
-                        <select bind:value={step.type}>
-                          <option value="request">Request</option>
-                          <option value="reference">Config step set</option>
-                        </select>
-                        <button
-                          class="icon-button danger-button"
-                          on:click={() => removeStepSetStep(stepSet, step.uid)}
-                          disabled={stepSet.steps.length === 1}
-                          aria-label="Remove step"
-                          title="Remove step"
-                        >
-                          <Trash2 size={18} />
-                        </button>
-                      </div>
-
-                    {#if step.collapsed}
-                      <p class="step-summary">
-                        {step.type === "reference"
-                          ? `Runs ${step.referenceName || "a config step set"}`
-                          : `${step.method} ${step.path || "/"}`}
-                      </p>
-                    {:else if step.type === "reference"}
-                      <div class="grid reference-grid">
-                        <label class="field">
-                          <span>Step set</span>
-                          <select bind:value={step.referenceName}>
-                            <option value="">Select step set</option>
-                            {#each catalog.stepSets as catalogStepSet}
-                              <option value={catalogStepSet}>{catalogStepSet}</option>
-                            {/each}
-                          </select>
-                        </label>
-                      </div>
-                    {:else}
-                      <div class="request-line">
-                        <select bind:value={step.method}>
-                          {#each ["GET", "POST", "PUT", "PATCH", "DELETE"] as method}
-                            <option>{method}</option>
-                          {/each}
-                        </select>
-                        <div class="suggest-wrap">
-                          <input
-                            bind:value={step.path}
-                            on:focus={(event) => updateSuggestionMenu(event, `${step.uid}:config-path`)}
-                            on:click={(event) => updateSuggestionMenu(event, `${step.uid}:config-path`)}
-                            on:input={(event) => updateSuggestionMenu(event, `${step.uid}:config-path`)}
-                            on:keydown={(event) =>
-                              handleSuggestionKeydown(event, `${step.uid}:config-path`, (suggestion) =>
-                                insertStepSuggestion(step, "path", suggestion),
-                              )}
-                            placeholder="/api/resource"
-                          />
-                          {#if suggestionMenu.key === `${step.uid}:config-path`}
-                            <div
-                              class="suggestions"
-                              style:left={`${suggestionMenu.left}px`}
-                              style:top={`${suggestionMenu.top}px`}
-                            >
-                              {#each suggestionMenu.items as suggestion, suggestionIndex}
-                                <button
-                                  class:active={suggestionMenu.index === suggestionIndex}
-                                  on:mousedown|preventDefault={() => insertStepSuggestion(step, "path", suggestion)}
-                                >
-                                  {suggestion}
-                                </button>
-                              {/each}
-                            </div>
-                          {/if}
-                        </div>
-                      </div>
-                      <div class="grid">
-                        <label class="field">
-                          <span>Step id</span>
-                          <input bind:value={step.stepId} />
-                        </label>
-                      </div>
-
-                      <section class="step-section">
-                        <div class="section-head">
-                          <button
-                            class="icon-button"
-                            on:click={() => toggleStepSection(step, "headersCollapsed")}
-                            aria-label={step.headersCollapsed ? "Show headers" : "Hide headers"}
-                            title={step.headersCollapsed ? "Show headers" : "Hide headers"}
-                          >
-                            {#if step.headersCollapsed}
-                              <ChevronRight size={18} />
-                            {:else}
-                              <ChevronDown size={18} />
-                            {/if}
-                          </button>
-                          <span>Headers</span>
-                          <button
-                            class="icon-button"
-                            on:click={() => addHeader(step)}
-                            disabled={step.headersCollapsed}
-                            aria-label="Add header"
-                            title="Add header"
-                          >
-                            <Plus size={18} />
-                          </button>
-                        </div>
-                        {#if !step.headersCollapsed}
-                          {#each step.headers as header (header.id)}
-                            <div class="header-row">
-                              <input bind:value={header.name} placeholder="Name" />
-                              <div class="suggest-wrap">
-                                <input
-                                  bind:value={header.value}
-                                  on:focus={(event) => updateSuggestionMenu(event, `${header.id}:config-header`)}
-                                  on:click={(event) => updateSuggestionMenu(event, `${header.id}:config-header`)}
-                                  on:input={(event) => updateSuggestionMenu(event, `${header.id}:config-header`)}
-                                  on:keydown={(event) =>
-                                    handleSuggestionKeydown(event, `${header.id}:config-header`, (suggestion) =>
-                                      insertHeaderSuggestion(header, suggestion),
-                                    )}
-                                  placeholder="Value"
-                                />
-                                {#if suggestionMenu.key === `${header.id}:config-header`}
-                                  <div
-                                    class="suggestions"
-                                    style:left={`${suggestionMenu.left}px`}
-                                    style:top={`${suggestionMenu.top}px`}
-                                  >
-                                    {#each suggestionMenu.items as suggestion, suggestionIndex}
-                                      <button
-                                        class:active={suggestionMenu.index === suggestionIndex}
-                                        on:mousedown|preventDefault={() => insertHeaderSuggestion(header, suggestion)}
-                                      >
-                                        {suggestion}
-                                      </button>
-                                    {/each}
-                                  </div>
-                                {/if}
-                              </div>
-                              <button
-                                class="icon-button danger-button"
-                                on:click={() => removeHeader(step, header.id)}
-                                aria-label="Remove header"
-                                title="Remove header"
-                              >
-                                <Trash2 size={18} />
-                              </button>
-                            </div>
-                          {/each}
-                        {/if}
-                      </section>
-
-                      <section class="step-section">
-                        <div class="section-head">
-                          <button
-                            class="icon-button"
-                            on:click={() => toggleStepSection(step, "bodyCollapsed")}
-                            aria-label={step.bodyCollapsed ? "Show request body" : "Hide request body"}
-                            title={step.bodyCollapsed ? "Show request body" : "Hide request body"}
-                          >
-                            {#if step.bodyCollapsed}
-                              <ChevronRight size={18} />
-                            {:else}
-                              <ChevronDown size={18} />
-                            {/if}
-                          </button>
-                          <span>Request Body</span>
-                        </div>
-                        {#if !step.bodyCollapsed}
-                          <div class="suggest-wrap">
-                            <textarea
-                              bind:value={step.body}
-                              on:focus={(event) => updateSuggestionMenu(event, `${step.uid}:config-body`)}
-                              on:click={(event) => updateSuggestionMenu(event, `${step.uid}:config-body`)}
-                              on:input={(event) => updateSuggestionMenu(event, `${step.uid}:config-body`)}
-                              on:keydown={(event) =>
-                                handleSuggestionKeydown(event, `${step.uid}:config-body`, (suggestion) =>
-                                  insertStepSuggestion(step, "body", suggestion),
-                                )}
-                              spellcheck="false"
-                              placeholder="title: Example"
-                            ></textarea>
-                            {#if suggestionMenu.key === `${step.uid}:config-body`}
-                              <div
-                                class="suggestions"
-                                style:left={`${suggestionMenu.left}px`}
-                                style:top={`${suggestionMenu.top}px`}
-                              >
-                                {#each suggestionMenu.items as suggestion, suggestionIndex}
-                                  <button
-                                    class:active={suggestionMenu.index === suggestionIndex}
-                                    on:mousedown|preventDefault={() => insertStepSuggestion(step, "body", suggestion)}
-                                  >
-                                    {suggestion}
-                                  </button>
-                                {/each}
-                              </div>
-                            {/if}
-                          </div>
-                        {/if}
-                      </section>
-
-                      <section class="step-section">
-                        <div class="section-head">
-                          <button
-                            class="icon-button"
-                            on:click={() => toggleStepSection(step, "assertionsCollapsed")}
-                            aria-label={step.assertionsCollapsed ? "Show assertions" : "Hide assertions"}
-                            title={step.assertionsCollapsed ? "Show assertions" : "Hide assertions"}
-                          >
-                            {#if step.assertionsCollapsed}
-                              <ChevronRight size={18} />
-                            {:else}
-                              <ChevronDown size={18} />
-                            {/if}
-                          </button>
-                          <span>Assertions</span>
-                        </div>
-                        {#if !step.assertionsCollapsed}
-                          <div class="grid assertion-grid">
-                            <label class="field">
-                              <span>Expected status</span>
-                              <input bind:value={step.statusCode} />
-                            </label>
-                          </div>
-                          <div class="assertion-subsection">
-                            <div class="assertion-subsection-head">
-                              <span>Header Assertions</span>
-                              <button
-                                class="icon-button"
-                                on:click={() => addAssertionHeader(step)}
-                                aria-label="Add header assertion"
-                                title="Add header assertion"
-                              >
-                                <Plus size={18} />
-                              </button>
-                            </div>
-                            {#each step.assertionHeaders as header (header.id)}
-                              <div class="header-row">
-                                <input bind:value={header.name} placeholder="Name" />
-                                <div class="suggest-wrap">
-                                  <input
-                                    bind:value={header.value}
-                                    on:focus={(event) => updateSuggestionMenu(event, `${header.id}:config-assertion-header`)}
-                                    on:click={(event) => updateSuggestionMenu(event, `${header.id}:config-assertion-header`)}
-                                    on:input={(event) => updateSuggestionMenu(event, `${header.id}:config-assertion-header`)}
-                                    on:keydown={(event) =>
-                                      handleSuggestionKeydown(event, `${header.id}:config-assertion-header`, (suggestion) =>
-                                        insertHeaderSuggestion(header, suggestion),
-                                      )}
-                                    placeholder="Value"
-                                  />
-                                  {#if suggestionMenu.key === `${header.id}:config-assertion-header`}
-                                    <div
-                                      class="suggestions"
-                                      style:left={`${suggestionMenu.left}px`}
-                                      style:top={`${suggestionMenu.top}px`}
-                                    >
-                                      {#each suggestionMenu.items as suggestion, suggestionIndex}
-                                        <button
-                                          class:active={suggestionMenu.index === suggestionIndex}
-                                          on:mousedown|preventDefault={() => insertHeaderSuggestion(header, suggestion)}
-                                        >
-                                          {suggestion}
-                                        </button>
-                                      {/each}
-                                    </div>
-                                  {/if}
-                                </div>
-                                <button
-                                  class="icon-button danger-button"
-                                  on:click={() => removeAssertionHeader(step, header.id)}
-                                  aria-label="Remove header assertion"
-                                  title="Remove header assertion"
-                                >
-                                  <Trash2 size={18} />
-                                </button>
-                              </div>
-                            {/each}
-                          </div>
-                          <label class="field assertion-body">
-                            <span>Response Body Assertions</span>
-                            <div class="suggest-wrap">
-                              <textarea
-                                bind:value={step.responseBody}
-                                on:focus={(event) => updateSuggestionMenu(event, `${step.uid}:config-response-body`)}
-                                on:click={(event) => updateSuggestionMenu(event, `${step.uid}:config-response-body`)}
-                                on:input={(event) => updateSuggestionMenu(event, `${step.uid}:config-response-body`)}
-                                on:keydown={(event) =>
-                                  handleSuggestionKeydown(event, `${step.uid}:config-response-body`, (suggestion) =>
-                                    insertResponseBodySuggestion(step, suggestion),
-                                  )}
-                                spellcheck="false"
-                                placeholder={"title: Example\nid: $create-user.response.id"}
-                              ></textarea>
-                              {#if suggestionMenu.key === `${step.uid}:config-response-body`}
-                                <div
-                                  class="suggestions"
-                                  style:left={`${suggestionMenu.left}px`}
-                                  style:top={`${suggestionMenu.top}px`}
-                                >
-                                  {#each suggestionMenu.items as suggestion, suggestionIndex}
-                                    <button
-                                      class:active={suggestionMenu.index === suggestionIndex}
-                                      on:mousedown|preventDefault={() => insertResponseBodySuggestion(step, suggestion)}
-                                    >
-                                      {suggestion}
-                                    </button>
-                                  {/each}
-                                </div>
-                              {/if}
-                            </div>
-                          </label>
-                        {/if}
-                      </section>
-                    {/if}
-                    </section>
+                    <StepEditor
+                      {step}
+                      {index}
+                      stepCount={stepSet.steps.length}
+                      stepSets={catalog.stepSets}
+                      {suggestionMenu}
+                      keyPrefix="config"
+                      nested={true}
+                      onChange={touchConfigDraft}
+                      onToggleStep={toggleStep}
+                      onToggleSection={toggleStepSection}
+                      onAddHeader={addHeader}
+                      onRemoveHeader={removeHeader}
+                      onAddAssertionHeader={addAssertionHeader}
+                      onRemoveAssertionHeader={removeAssertionHeader}
+                      onRemoveStep={(uid) => removeStepSetStep(stepSet, uid)}
+                      {updateSuggestionMenu}
+                      {handleSuggestionKeydown}
+                      {insertStepSuggestion}
+                      {insertHeaderSuggestion}
+                      {insertResponseBodySuggestion}
+                    />
                   {/each}
                 </div>
 
@@ -1476,361 +1151,33 @@
 
         <div class="steps" role="list">
           {#each draft.steps as step, index (step.uid)}
-            <section
-              class="step-card"
-              role="listitem"
-              class:dragging={draggingStepUid === step.uid}
-              class:drag-over={dragOverStepUid === step.uid && draggingStepUid !== step.uid}
-              on:dragover={(event) => onDragOver(event, step.uid)}
-              on:drop={(event) => onDrop(event, step.uid)}
-            >
-              <div class="step-title">
-                <button
-                  class="icon-button drag-handle"
-                  draggable="true"
-                  on:dragstart={(event) => onDragStart(event, step.uid)}
-                  on:dragend={onDragEnd}
-                  aria-label="Drag step"
-                  title="Drag step"
-                >
-                  <GripVertical size={18} />
-                </button>
-                <button
-                  class="icon-button"
-                  on:click={() => toggleStep(step)}
-                  aria-label={step.collapsed ? "Show step" : "Hide step"}
-                  title={step.collapsed ? "Show step" : "Hide step"}
-                >
-                  {#if step.collapsed}
-                    <EyeOff size={18} />
-                    <Eye class="hover-icon" size={18} />
-                  {:else}
-                    <Eye size={18} />
-                    <EyeOff class="hover-icon" size={18} />
-                  {/if}
-                </button>
-                <h3>
-                  Step {index + 1}
-                  <small>
-                    {step.type === "reference"
-                      ? step.referenceName || "Config step set"
-                      : step.stepId || step.path || "Request"}
-                  </small>
-                </h3>
-                <select bind:value={step.type}>
-                  <option value="request">Request</option>
-                  <option value="reference">Config step set</option>
-                </select>
-                <button
-                  class="icon-button danger-button"
-                  on:click={() => removeStep(step.uid)}
-                  disabled={draft.steps.length === 1}
-                  aria-label="Remove step"
-                  title="Remove step"
-                >
-                  <Trash2 size={18} />
-                </button>
-              </div>
-
-              {#if step.collapsed}
-                <p class="step-summary">
-                  {step.type === "reference"
-                    ? `Runs ${step.referenceName || "a config step set"}`
-                    : `${step.method} ${step.path || "/"}`}
-                </p>
-              {:else if step.type === "reference"}
-                <div class="grid reference-grid">
-                  <label class="field">
-                    <span>Step set</span>
-                    <select bind:value={step.referenceName}>
-                      <option value="">Select step set</option>
-                      {#each catalog.stepSets as stepSet}
-                        <option value={stepSet}>{stepSet}</option>
-                      {/each}
-                    </select>
-                  </label>
-                </div>
-              {:else}
-                <div class="request-line">
-                  <select bind:value={step.method}>
-                    {#each ["GET", "POST", "PUT", "PATCH", "DELETE"] as method}
-                      <option>{method}</option>
-                    {/each}
-                  </select>
-                  <div class="suggest-wrap">
-                    <input
-                      bind:value={step.path}
-                      on:focus={(event) => updateSuggestionMenu(event, `${step.uid}:path`)}
-                      on:click={(event) => updateSuggestionMenu(event, `${step.uid}:path`)}
-                      on:input={(event) => updateSuggestionMenu(event, `${step.uid}:path`)}
-                      on:keydown={(event) =>
-                        handleSuggestionKeydown(event, `${step.uid}:path`, (suggestion) =>
-                          insertStepSuggestion(step, "path", suggestion),
-                        )}
-                      placeholder="/api/resource"
-                    />
-                    {#if suggestionMenu.key === `${step.uid}:path`}
-                      <div
-                        class="suggestions"
-                        style:left={`${suggestionMenu.left}px`}
-                        style:top={`${suggestionMenu.top}px`}
-                      >
-                        {#each suggestionMenu.items as suggestion, suggestionIndex}
-                          <button
-                            class:active={suggestionMenu.index === suggestionIndex}
-                            on:mousedown|preventDefault={() => insertStepSuggestion(step, "path", suggestion)}
-                          >
-                            {suggestion}
-                          </button>
-                        {/each}
-                      </div>
-                    {/if}
-                  </div>
-                </div>
-
-                <div class="grid">
-                  <label class="field">
-                    <span>Step id</span>
-                    <input bind:value={step.stepId} />
-                  </label>
-                </div>
-
-                <section class="step-section">
-                  <div class="section-head">
-                    <button
-                      class="icon-button"
-                      on:click={() => toggleStepSection(step, "headersCollapsed")}
-                      aria-label={step.headersCollapsed ? "Show headers" : "Hide headers"}
-                      title={step.headersCollapsed ? "Show headers" : "Hide headers"}
-                    >
-                      {#if step.headersCollapsed}
-                        <ChevronRight size={18} />
-                      {:else}
-                        <ChevronDown size={18} />
-                      {/if}
-                    </button>
-                    <span>Headers</span>
-                    <button
-                      class="icon-button"
-                      on:click={() => addHeader(step)}
-                      disabled={step.headersCollapsed}
-                      aria-label="Add header"
-                      title="Add header"
-                    >
-                      <Plus size={18} />
-                    </button>
-                  </div>
-                  {#if !step.headersCollapsed}
-                    {#each step.headers as header (header.id)}
-                      <div class="header-row">
-                        <input bind:value={header.name} placeholder="Name" />
-                        <div class="suggest-wrap">
-                          <input
-                            bind:value={header.value}
-                            on:focus={(event) => updateSuggestionMenu(event, `${header.id}:value`)}
-                            on:click={(event) => updateSuggestionMenu(event, `${header.id}:value`)}
-                            on:input={(event) => updateSuggestionMenu(event, `${header.id}:value`)}
-                            on:keydown={(event) =>
-                              handleSuggestionKeydown(event, `${header.id}:value`, (suggestion) =>
-                                insertHeaderSuggestion(header, suggestion),
-                              )}
-                            placeholder="Value"
-                          />
-                          {#if suggestionMenu.key === `${header.id}:value`}
-                            <div
-                              class="suggestions"
-                              style:left={`${suggestionMenu.left}px`}
-                              style:top={`${suggestionMenu.top}px`}
-                            >
-                              {#each suggestionMenu.items as suggestion, suggestionIndex}
-                                <button
-                                  class:active={suggestionMenu.index === suggestionIndex}
-                                  on:mousedown|preventDefault={() => insertHeaderSuggestion(header, suggestion)}
-                                >
-                                  {suggestion}
-                                </button>
-                              {/each}
-                            </div>
-                          {/if}
-                        </div>
-                        <button
-                          class="icon-button danger-button"
-                          on:click={() => removeHeader(step, header.id)}
-                          aria-label="Remove header"
-                          title="Remove header"
-                        >
-                          <Trash2 size={18} />
-                        </button>
-                      </div>
-                    {/each}
-                  {/if}
-                </section>
-
-                <section class="step-section">
-                  <div class="section-head">
-                    <button
-                      class="icon-button"
-                      on:click={() => toggleStepSection(step, "bodyCollapsed")}
-                      aria-label={step.bodyCollapsed ? "Show request body" : "Hide request body"}
-                      title={step.bodyCollapsed ? "Show request body" : "Hide request body"}
-                    >
-                      {#if step.bodyCollapsed}
-                        <ChevronRight size={18} />
-                      {:else}
-                        <ChevronDown size={18} />
-                      {/if}
-                    </button>
-                    <span>Request Body</span>
-                  </div>
-                  {#if !step.bodyCollapsed}
-                    <div class="suggest-wrap">
-                      <textarea
-                        bind:value={step.body}
-                        on:focus={(event) => updateSuggestionMenu(event, `${step.uid}:body`)}
-                        on:click={(event) => updateSuggestionMenu(event, `${step.uid}:body`)}
-                        on:input={(event) => updateSuggestionMenu(event, `${step.uid}:body`)}
-                        on:keydown={(event) =>
-                          handleSuggestionKeydown(event, `${step.uid}:body`, (suggestion) =>
-                            insertStepSuggestion(step, "body", suggestion),
-                          )}
-                        spellcheck="false"
-                        placeholder="title: Example"
-                      ></textarea>
-                      {#if suggestionMenu.key === `${step.uid}:body`}
-                        <div
-                          class="suggestions"
-                          style:left={`${suggestionMenu.left}px`}
-                          style:top={`${suggestionMenu.top}px`}
-                        >
-                          {#each suggestionMenu.items as suggestion, suggestionIndex}
-                            <button
-                              class:active={suggestionMenu.index === suggestionIndex}
-                              on:mousedown|preventDefault={() => insertStepSuggestion(step, "body", suggestion)}
-                            >
-                              {suggestion}
-                            </button>
-                          {/each}
-                        </div>
-                      {/if}
-                    </div>
-                  {/if}
-                </section>
-
-                <section class="step-section">
-                  <div class="section-head">
-                    <button
-                      class="icon-button"
-                      on:click={() => toggleStepSection(step, "assertionsCollapsed")}
-                      aria-label={step.assertionsCollapsed ? "Show assertions" : "Hide assertions"}
-                      title={step.assertionsCollapsed ? "Show assertions" : "Hide assertions"}
-                    >
-                      {#if step.assertionsCollapsed}
-                        <ChevronRight size={18} />
-                      {:else}
-                        <ChevronDown size={18} />
-                      {/if}
-                    </button>
-                    <span>Assertions</span>
-                  </div>
-                  {#if !step.assertionsCollapsed}
-                    <div class="grid assertion-grid">
-                      <label class="field">
-                        <span>Expected status</span>
-                        <input bind:value={step.statusCode} />
-                      </label>
-                    </div>
-                    <div class="assertion-subsection">
-                      <div class="assertion-subsection-head">
-                        <span>Header Assertions</span>
-                        <button
-                          class="icon-button"
-                          on:click={() => addAssertionHeader(step)}
-                          aria-label="Add header assertion"
-                          title="Add header assertion"
-                        >
-                          <Plus size={18} />
-                        </button>
-                      </div>
-                      {#each step.assertionHeaders as header (header.id)}
-                        <div class="header-row">
-                          <input bind:value={header.name} placeholder="Name" />
-                          <div class="suggest-wrap">
-                            <input
-                              bind:value={header.value}
-                              on:focus={(event) => updateSuggestionMenu(event, `${header.id}:assertion-value`)}
-                              on:click={(event) => updateSuggestionMenu(event, `${header.id}:assertion-value`)}
-                              on:input={(event) => updateSuggestionMenu(event, `${header.id}:assertion-value`)}
-                              on:keydown={(event) =>
-                                handleSuggestionKeydown(event, `${header.id}:assertion-value`, (suggestion) =>
-                                  insertHeaderSuggestion(header, suggestion),
-                                )}
-                              placeholder="Value"
-                            />
-                            {#if suggestionMenu.key === `${header.id}:assertion-value`}
-                              <div
-                                class="suggestions"
-                                style:left={`${suggestionMenu.left}px`}
-                                style:top={`${suggestionMenu.top}px`}
-                              >
-                                {#each suggestionMenu.items as suggestion, suggestionIndex}
-                                  <button
-                                    class:active={suggestionMenu.index === suggestionIndex}
-                                    on:mousedown|preventDefault={() => insertHeaderSuggestion(header, suggestion)}
-                                  >
-                                    {suggestion}
-                                  </button>
-                                {/each}
-                              </div>
-                            {/if}
-                          </div>
-                          <button
-                            class="icon-button danger-button"
-                            on:click={() => removeAssertionHeader(step, header.id)}
-                            aria-label="Remove header assertion"
-                            title="Remove header assertion"
-                          >
-                            <Trash2 size={18} />
-                          </button>
-                        </div>
-                      {/each}
-                    </div>
-                    <label class="field assertion-body">
-                      <span>Response Body Assertions</span>
-                      <div class="suggest-wrap">
-                        <textarea
-                          bind:value={step.responseBody}
-                          on:focus={(event) => updateSuggestionMenu(event, `${step.uid}:response-body`)}
-                          on:click={(event) => updateSuggestionMenu(event, `${step.uid}:response-body`)}
-                          on:input={(event) => updateSuggestionMenu(event, `${step.uid}:response-body`)}
-                          on:keydown={(event) =>
-                            handleSuggestionKeydown(event, `${step.uid}:response-body`, (suggestion) =>
-                              insertResponseBodySuggestion(step, suggestion),
-                            )}
-                          spellcheck="false"
-                          placeholder={"title: Example\nid: $create-user.response.id"}
-                        ></textarea>
-                        {#if suggestionMenu.key === `${step.uid}:response-body`}
-                          <div
-                            class="suggestions"
-                            style:left={`${suggestionMenu.left}px`}
-                            style:top={`${suggestionMenu.top}px`}
-                          >
-                            {#each suggestionMenu.items as suggestion, suggestionIndex}
-                              <button
-                                class:active={suggestionMenu.index === suggestionIndex}
-                                on:mousedown|preventDefault={() => insertResponseBodySuggestion(step, suggestion)}
-                              >
-                                {suggestion}
-                              </button>
-                            {/each}
-                          </div>
-                        {/if}
-                      </div>
-                    </label>
-                  {/if}
-                </section>
-              {/if}
-            </section>
+            <StepEditor
+              {step}
+              {index}
+              stepCount={draft.steps.length}
+              stepSets={catalog.stepSets}
+              {suggestionMenu}
+              draggable={true}
+              {draggingStepUid}
+              {dragOverStepUid}
+              onChange={touchDraft}
+              onToggleStep={toggleStep}
+              onToggleSection={toggleStepSection}
+              onAddHeader={addHeader}
+              onRemoveHeader={removeHeader}
+              onAddAssertionHeader={addAssertionHeader}
+              onRemoveAssertionHeader={removeAssertionHeader}
+              onRemoveStep={removeStep}
+              {onDragStart}
+              {onDragOver}
+              {onDrop}
+              {onDragEnd}
+              {updateSuggestionMenu}
+              {handleSuggestionKeydown}
+              {insertStepSuggestion}
+              {insertHeaderSuggestion}
+              {insertResponseBodySuggestion}
+            />
           {/each}
         </div>
 
