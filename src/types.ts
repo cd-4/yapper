@@ -32,6 +32,11 @@ export type StepDraft = {
   headersCollapsed: boolean;
   bodyCollapsed: boolean;
   assertionsCollapsed: boolean;
+  optionsCollapsed: boolean;
+  url: string;
+  waitBefore: string;
+  waitAfter: string;
+  retry: string;
   path: string;
   method: string;
   stepId: string;
@@ -47,6 +52,40 @@ export type TestDraft = {
   setupName: string;
   cleanupName: string;
   steps: StepDraft[];
+};
+
+export type VariableDraft = {
+  id: string;
+  name: string;
+  env: string;
+  defaultValue: string;
+};
+
+export type UrlDraft = {
+  id: string;
+  name: string;
+  value: string;
+};
+
+export type OutputDraft = {
+  id: string;
+  name: string;
+  value: string;
+};
+
+export type StepSetDraft = {
+  id: string;
+  name: string;
+  once: boolean;
+  collapsed: boolean;
+  steps: StepDraft[];
+  outputs: OutputDraft[];
+};
+
+export type ConfigDraft = {
+  vars: VariableDraft[];
+  urls: UrlDraft[];
+  stepSets: StepSetDraft[];
 };
 
 export type ReferenceCatalog = {

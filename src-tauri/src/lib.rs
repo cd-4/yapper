@@ -1,5 +1,6 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
+    env,
     fs,
     path::{Component, Path, PathBuf},
     process::Command,
@@ -45,6 +46,69 @@ struct RunResult {
 struct GitStatus {
     available: bool,
     output: String,
+}
+
+#[derive(Deserialize, Serialize)]
+struct ProjectStore {
+    projects: Vec<String>,
+}
+
+fn config_dir() -> AppResult<PathBuf> {
+    let home = env::var_os("HOME")
+        .or_else(|| env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .ok_or_else(|| AppError::Message("Could not resolve the home directory".into()))?;
+    Ok(home.join(".config").join("yapper"))
+}
+
+fn projects_file() -> AppResult<PathBuf> {
+    Ok(config_dir()?.join("projects.json"))
+}
+
+fn read_project_store() -> AppResult<ProjectStore> {
+    let path = projects_file()?;
+    if !path.exists() {
+        return Ok(ProjectStore {
+            projects: Vec::new(),
+        });
+    }
+    let contents = fs::read_to_string(path)?;
+    serde_json::from_str(&contents)
+        .map_err(|error| AppError::Message(format!("Could not read saved projects: {error}")))
+}
+
+fn write_project_store(store: &ProjectStore) -> AppResult<()> {
+    let path = projects_file()?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let contents = serde_json::to_string_pretty(store)
+        .map_err(|error| AppError::Message(format!("Could not save projects: {error}")))?;
+    fs::write(path, contents)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn list_projects() -> AppResult<Vec<String>> {
+    Ok(read_project_store()?.projects)
+}
+
+#[tauri::command]
+fn add_project(root: String) -> AppResult<Vec<String>> {
+    let root = normalize_root(&root)?.to_string_lossy().to_string();
+    let mut store = read_project_store()?;
+    store.projects.retain(|project| project != &root);
+    store.projects.push(root);
+    write_project_store(&store)?;
+    Ok(store.projects)
+}
+
+#[tauri::command]
+fn remove_project(root: String) -> AppResult<Vec<String>> {
+    let mut store = read_project_store()?;
+    store.projects.retain(|project| project != &root);
+    write_project_store(&store)?;
+    Ok(store.projects)
 }
 
 fn normalize_root(root: &str) -> AppResult<PathBuf> {
@@ -365,13 +429,17 @@ fn git_status(root: String) -> AppResult<GitStatus> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             scan_repository,
             read_yaml_file,
             write_yaml_file,
             create_sample_project,
             run_yapitest,
-            git_status
+            git_status,
+            list_projects,
+            add_project,
+            remove_project
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
