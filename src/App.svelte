@@ -1,6 +1,6 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
-  import { Eye, EyeOff, Play, Plus, Save, Trash2 } from "lucide-svelte";
+  import { Eye, EyeOff, GripVertical, Play, Plus, Save, Trash2 } from "lucide-svelte";
   import { buildTestYaml, extractReferenceCatalog, mergeCatalogs, sampleConfig } from "./yaml";
   import type { FileEntry, GitStatus, ReferenceCatalog, RunResult, StepDraft, TestDraft } from "./types";
 
@@ -18,6 +18,15 @@
   let filter = "";
   let focusedKey = "";
   let previewCollapsed = false;
+  let draggingStepUid = "";
+  let dragOverStepUid = "";
+  let suggestionMenu = {
+    key: "",
+    index: 0,
+    left: 0,
+    top: 0,
+    items: [] as string[],
+  };
 
   const emptyCatalog: ReferenceCatalog = { vars: [], urls: [], stepSets: [], outputs: [] };
   let catalog = emptyCatalog;
@@ -49,6 +58,9 @@
   $: dirty = editor !== original;
   $: generatedYaml = buildTestYaml(draft);
   $: suggestions = buildSuggestions(draft, catalog);
+  $: if (view === "builder") {
+    editor = generatedYaml;
+  }
 
   async function call<T>(name: string, args: Record<string, unknown> = {}) {
     try {
@@ -119,13 +131,24 @@
     });
     await scan();
     const file = files.find((item) => item.relative_path === relativePath);
-    if (file) {
+    if (file && activeView !== "builder") {
       selected = file;
+      editor = generatedYaml;
+      original = generatedYaml;
+    } else {
+      selected = null;
       editor = generatedYaml;
       original = generatedYaml;
     }
     view = activeView;
     return relativePath;
+  }
+
+  function showBuilder() {
+    selected = null;
+    editor = generatedYaml;
+    original = generatedYaml;
+    view = "builder";
   }
 
   async function createSampleProject() {
@@ -178,6 +201,41 @@
     draft.steps = [...draft.steps];
   }
 
+  function moveStep(fromUid: string, toUid: string) {
+    if (!fromUid || !toUid || fromUid === toUid) return;
+    const next = [...draft.steps];
+    const from = next.findIndex((step) => step.uid === fromUid);
+    const to = next.findIndex((step) => step.uid === toUid);
+    if (from === -1 || to === -1) return;
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    draft.steps = next;
+  }
+
+  function onDragStart(event: DragEvent, uid: string) {
+    draggingStepUid = uid;
+    event.dataTransfer?.setData("text/plain", uid);
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+  }
+
+  function onDragOver(event: DragEvent, uid: string) {
+    event.preventDefault();
+    dragOverStepUid = uid;
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+  }
+
+  function onDrop(event: DragEvent, uid: string) {
+    event.preventDefault();
+    moveStep(event.dataTransfer?.getData("text/plain") || draggingStepUid, uid);
+    draggingStepUid = "";
+    dragOverStepUid = "";
+  }
+
+  function onDragEnd() {
+    draggingStepUid = "";
+    dragOverStepUid = "";
+  }
+
   function addHeader(step: StepDraft) {
     step.headers = [...step.headers, { id: crypto.randomUUID(), name: "", value: "" }];
     draft.steps = [...draft.steps];
@@ -188,27 +246,165 @@
     draft.steps = [...draft.steps];
   }
 
-  function withSuggestion(current: string, value: string) {
-    const at = current.lastIndexOf("$");
-    return at === -1 ? `${current}${value}` : `${current.slice(0, at)}${value}`;
+  function tokenAtCaret(value: string, caret: number) {
+    const beforeCaret = value.slice(0, caret);
+    const start = beforeCaret.lastIndexOf("$");
+    if (start === -1) return null;
+
+    const token = beforeCaret.slice(start);
+    if (/[\s"'{}[\],]/.test(token)) return null;
+
+    return { start, token: token.toLowerCase() };
+  }
+
+  function matchesForToken(value: string, caret: number) {
+    const activeToken = tokenAtCaret(value, caret);
+    if (!activeToken) return [];
+    return suggestions
+      .filter((suggestion) => suggestion.toLowerCase().startsWith(activeToken.token))
+      .slice(0, 8);
+  }
+
+  function positionForToken(input: HTMLInputElement | HTMLTextAreaElement, tokenStart: number) {
+    const wrapper = input.closest(".suggest-wrap") as HTMLElement | null;
+    if (!wrapper) return { left: 0, top: input.offsetHeight + 4 };
+
+    const inputStyle = window.getComputedStyle(input);
+    const mirror = document.createElement("div");
+    const marker = document.createElement("span");
+
+    mirror.style.position = "fixed";
+    mirror.style.visibility = "hidden";
+    mirror.style.left = `${input.getBoundingClientRect().left}px`;
+    mirror.style.top = `${input.getBoundingClientRect().top}px`;
+    mirror.style.width = `${input.getBoundingClientRect().width}px`;
+    mirror.style.boxSizing = inputStyle.boxSizing;
+    mirror.style.border = inputStyle.border;
+    mirror.style.padding = inputStyle.padding;
+    mirror.style.font = inputStyle.font;
+    mirror.style.letterSpacing = inputStyle.letterSpacing;
+    mirror.style.lineHeight = inputStyle.lineHeight;
+    mirror.style.whiteSpace = input instanceof HTMLTextAreaElement ? "pre-wrap" : "pre";
+    mirror.style.overflowWrap = "break-word";
+
+    mirror.textContent = input.value.slice(0, tokenStart);
+    marker.textContent = "$";
+    mirror.append(marker);
+    document.body.append(mirror);
+
+    const markerRect = marker.getBoundingClientRect();
+    const wrapperRect = wrapper.getBoundingClientRect();
+    const lineHeight = Number.parseFloat(inputStyle.lineHeight) || 18;
+    const position = {
+      left: Math.max(0, markerRect.left - wrapperRect.left - input.scrollLeft),
+      top: Math.max(0, markerRect.top - wrapperRect.top - input.scrollTop + lineHeight + 4),
+    };
+
+    mirror.remove();
+    return position;
+  }
+
+  function updateSuggestionMenu(event: Event, key: string) {
+    const input = event.currentTarget as HTMLInputElement | HTMLTextAreaElement;
+    focusedKey = key;
+
+    const caret = input.selectionStart ?? input.value.length;
+    const activeToken = tokenAtCaret(input.value, caret);
+    const items = matchesForToken(input.value, caret);
+
+    if (!activeToken || items.length === 0) {
+      if (suggestionMenu.key === key) closeSuggestions();
+      return;
+    }
+
+    const position = positionForToken(input, activeToken.start);
+    suggestionMenu = {
+      key,
+      index: suggestionMenu.key === key ? Math.min(suggestionMenu.index, items.length - 1) : 0,
+      left: position.left,
+      top: position.top,
+      items,
+    };
+  }
+
+  function closeSuggestions() {
+    suggestionMenu = { key: "", index: 0, left: 0, top: 0, items: [] };
+  }
+
+  function replaceToken(current: string, suggestion: string, caret: number) {
+    const activeToken = tokenAtCaret(current, caret);
+    if (!activeToken) return { value: `${current}${suggestion}`, caret: current.length + suggestion.length };
+
+    const value = `${current.slice(0, activeToken.start)}${suggestion}${current.slice(caret)}`;
+    return { value, caret: activeToken.start + suggestion.length };
+  }
+
+  function restoreCaret(caret: number) {
+    const input = document.activeElement as HTMLInputElement | HTMLTextAreaElement | null;
+    window.setTimeout(() => {
+      input?.focus();
+      input?.setSelectionRange(caret, caret);
+    });
   }
 
   function insertStepSuggestion(step: StepDraft, field: "path" | "body", value: string) {
-    step[field] = withSuggestion(step[field], value);
+    const input = document.activeElement as HTMLInputElement | HTMLTextAreaElement | null;
+    const caret = input?.selectionStart ?? step[field].length;
+    const next = replaceToken(step[field], value, caret);
+    step[field] = next.value;
     draft.steps = [...draft.steps];
-    focusedKey = "";
+    closeSuggestions();
+    restoreCaret(next.caret);
   }
 
   function insertHeaderSuggestion(header: { value: string }, value: string) {
-    header.value = withSuggestion(header.value, value);
+    const input = document.activeElement as HTMLInputElement | HTMLTextAreaElement | null;
+    const caret = input?.selectionStart ?? header.value.length;
+    const next = replaceToken(header.value, value, caret);
+    header.value = next.value;
     draft.steps = [...draft.steps];
-    focusedKey = "";
+    closeSuggestions();
+    restoreCaret(next.caret);
   }
 
-  function activeSuggestions(value: string) {
-    if (!value.includes("$")) return [];
-    const token = value.slice(value.lastIndexOf("$")).toLowerCase();
-    return suggestions.filter((suggestion) => suggestion.toLowerCase().startsWith(token)).slice(0, 8);
+  function handleSuggestionKeydown(
+    event: KeyboardEvent,
+    key: string,
+    insert: (suggestion: string) => void,
+  ) {
+    const openedMenu = event.key === "ArrowDown" && suggestionMenu.key !== key;
+    if (event.key === "ArrowDown" && suggestionMenu.key !== key) {
+      updateSuggestionMenu(event, key);
+    }
+
+    if (suggestionMenu.key !== key || suggestionMenu.items.length === 0) return;
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      if (openedMenu) return;
+      suggestionMenu = {
+        ...suggestionMenu,
+        index: (suggestionMenu.index + 1) % suggestionMenu.items.length,
+      };
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      suggestionMenu = {
+        ...suggestionMenu,
+        index: (suggestionMenu.index - 1 + suggestionMenu.items.length) % suggestionMenu.items.length,
+      };
+    }
+
+    if (event.key === "Enter" || event.key === "Tab") {
+      event.preventDefault();
+      insert(suggestionMenu.items[suggestionMenu.index]);
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeSuggestions();
+    }
   }
 
   function buildSuggestions(test: TestDraft, references: ReferenceCatalog) {
@@ -285,7 +481,7 @@
         <button on:click={() => runYapitest()} disabled={busy || !rootPath}>Run All</button>
         <button on:click={runDraft} disabled={busy || !rootPath}>Run Draft</button>
         <div class="tabs">
-          <button class:active={view === "builder"} on:click={() => (view = "builder")}>Builder</button>
+          <button class:active={view === "builder"} on:click={showBuilder}>Builder</button>
           <button class:active={view === "yaml"} on:click={() => (view = "yaml")}>YAML</button>
         </div>
       </div>
@@ -345,10 +541,27 @@
           </div>
         </div>
 
-        <div class="steps">
+        <div class="steps" role="list">
           {#each draft.steps as step, index (step.uid)}
-            <section class="step-card">
+            <section
+              class="step-card"
+              role="listitem"
+              class:dragging={draggingStepUid === step.uid}
+              class:drag-over={dragOverStepUid === step.uid && draggingStepUid !== step.uid}
+              on:dragover={(event) => onDragOver(event, step.uid)}
+              on:drop={(event) => onDrop(event, step.uid)}
+            >
               <div class="step-title">
+                <button
+                  class="icon-button drag-handle"
+                  draggable="true"
+                  on:dragstart={(event) => onDragStart(event, step.uid)}
+                  on:dragend={onDragEnd}
+                  aria-label="Drag step"
+                  title="Drag step"
+                >
+                  <GripVertical size={18} />
+                </button>
                 <button
                   class="icon-button"
                   on:click={() => toggleStep(step)}
@@ -406,14 +619,26 @@
                   <div class="suggest-wrap">
                     <input
                       bind:value={step.path}
-                      on:focus={() => (focusedKey = `${step.uid}:path`)}
-                      on:input={() => (focusedKey = `${step.uid}:path`)}
+                      on:focus={(event) => updateSuggestionMenu(event, `${step.uid}:path`)}
+                      on:click={(event) => updateSuggestionMenu(event, `${step.uid}:path`)}
+                      on:input={(event) => updateSuggestionMenu(event, `${step.uid}:path`)}
+                      on:keydown={(event) =>
+                        handleSuggestionKeydown(event, `${step.uid}:path`, (suggestion) =>
+                          insertStepSuggestion(step, "path", suggestion),
+                        )}
                       placeholder="/api/resource"
                     />
-                    {#if focusedKey === `${step.uid}:path` && activeSuggestions(step.path).length}
-                      <div class="suggestions">
-                        {#each activeSuggestions(step.path) as suggestion}
-                          <button on:mousedown|preventDefault={() => insertStepSuggestion(step, "path", suggestion)}>
+                    {#if suggestionMenu.key === `${step.uid}:path`}
+                      <div
+                        class="suggestions"
+                        style:left={`${suggestionMenu.left}px`}
+                        style:top={`${suggestionMenu.top}px`}
+                      >
+                        {#each suggestionMenu.items as suggestion, suggestionIndex}
+                          <button
+                            class:active={suggestionMenu.index === suggestionIndex}
+                            on:mousedown|preventDefault={() => insertStepSuggestion(step, "path", suggestion)}
+                          >
                             {suggestion}
                           </button>
                         {/each}
@@ -444,14 +669,26 @@
                       <div class="suggest-wrap">
                         <input
                           bind:value={header.value}
-                          on:focus={() => (focusedKey = `${header.id}:value`)}
-                          on:input={() => (focusedKey = `${header.id}:value`)}
+                          on:focus={(event) => updateSuggestionMenu(event, `${header.id}:value`)}
+                          on:click={(event) => updateSuggestionMenu(event, `${header.id}:value`)}
+                          on:input={(event) => updateSuggestionMenu(event, `${header.id}:value`)}
+                          on:keydown={(event) =>
+                            handleSuggestionKeydown(event, `${header.id}:value`, (suggestion) =>
+                              insertHeaderSuggestion(header, suggestion),
+                            )}
                           placeholder="Value"
                         />
-                        {#if focusedKey === `${header.id}:value` && activeSuggestions(header.value).length}
-                          <div class="suggestions">
-                            {#each activeSuggestions(header.value) as suggestion}
-                              <button on:mousedown|preventDefault={() => insertHeaderSuggestion(header, suggestion)}>
+                        {#if suggestionMenu.key === `${header.id}:value`}
+                          <div
+                            class="suggestions"
+                            style:left={`${suggestionMenu.left}px`}
+                            style:top={`${suggestionMenu.top}px`}
+                          >
+                            {#each suggestionMenu.items as suggestion, suggestionIndex}
+                              <button
+                                class:active={suggestionMenu.index === suggestionIndex}
+                                on:mousedown|preventDefault={() => insertHeaderSuggestion(header, suggestion)}
+                              >
                                 {suggestion}
                               </button>
                             {/each}
@@ -475,15 +712,27 @@
                   <div class="suggest-wrap">
                     <textarea
                       bind:value={step.body}
-                      on:focus={() => (focusedKey = `${step.uid}:body`)}
-                      on:input={() => (focusedKey = `${step.uid}:body`)}
+                      on:focus={(event) => updateSuggestionMenu(event, `${step.uid}:body`)}
+                      on:click={(event) => updateSuggestionMenu(event, `${step.uid}:body`)}
+                      on:input={(event) => updateSuggestionMenu(event, `${step.uid}:body`)}
+                      on:keydown={(event) =>
+                        handleSuggestionKeydown(event, `${step.uid}:body`, (suggestion) =>
+                          insertStepSuggestion(step, "body", suggestion),
+                        )}
                       spellcheck="false"
                       placeholder="title: Example"
                     ></textarea>
-                    {#if focusedKey === `${step.uid}:body` && activeSuggestions(step.body).length}
-                      <div class="suggestions">
-                        {#each activeSuggestions(step.body) as suggestion}
-                          <button on:mousedown|preventDefault={() => insertStepSuggestion(step, "body", suggestion)}>
+                    {#if suggestionMenu.key === `${step.uid}:body`}
+                      <div
+                        class="suggestions"
+                        style:left={`${suggestionMenu.left}px`}
+                        style:top={`${suggestionMenu.top}px`}
+                      >
+                        {#each suggestionMenu.items as suggestion, suggestionIndex}
+                          <button
+                            class:active={suggestionMenu.index === suggestionIndex}
+                            on:mousedown|preventDefault={() => insertStepSuggestion(step, "body", suggestion)}
+                          >
                             {suggestion}
                           </button>
                         {/each}
@@ -511,7 +760,9 @@
     {:else}
       <section class="editor-pane">
         <div class="editor-actions">
-          <button on:click={save} disabled={!selected || !dirty || busy}>Save</button>
+          <button on:click={selected ? save : saveDraft} disabled={busy || (!selected && !rootPath) || (selected && !dirty)}>
+            Save
+          </button>
           <button on:click={() => selected && runYapitest(selected.relative_path)} disabled={!selected || busy}>
             Run File
           </button>
