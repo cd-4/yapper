@@ -1,6 +1,6 @@
 :root {
   color: #1e1b2e;
-  background: #f4f2ff;
+  background: transparent;
   --bg: #f4f2ff;
   --surface: #ffffff;
   --surface-muted: #eee9ff;
@@ -11,7 +11,7 @@
   --muted: #675f7b;
   --accent: #f2c94c;
   --accent-strong: #6f4bd8;
-  --accent-soft: #ffffff;
+  --accent-soft: #eee9ff;
   --green: #217a63;
   --green-soft: #d9eee7;
   --danger: #c2415d;
@@ -28,6 +28,7 @@
 }
 
 body {
+  background: transparent;
   margin: 0;
   overflow: hidden;
 }
@@ -143,7 +144,7 @@ select {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
-  height: 36px;
+  height: 32px;
   justify-content: initial;
   padding: 0 9px 0 10px;
   text-align: left;
@@ -232,6 +233,7 @@ textarea {
 
 .app-frame {
   background: var(--bg);
+  border-radius: 8px;
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -349,7 +351,7 @@ textarea {
 }
 
 .shell.sidebar-collapsed {
-  grid-template-columns: 62px 1fr;
+  grid-template-columns: 54px 1fr;
 }
 
 .sidebar {
@@ -361,6 +363,43 @@ textarea {
   min-width: 0;
   overflow: hidden;
   padding: 10px;
+}
+
+.shell.sidebar-collapsed .sidebar {
+  overflow: visible;
+  padding: 8px;
+  position: relative;
+  z-index: 15;
+}
+
+.collapsed-rail {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rail-mark {
+  align-items: center;
+  background: var(--accent);
+  border-radius: 3px;
+  color: #241747;
+  display: inline-flex;
+  flex: none;
+  font-weight: 800;
+  height: 32px;
+  justify-content: center;
+  width: 32px;
+}
+
+.rail-button {
+  flex: none;
+}
+
+.rail-button.active {
+  background: var(--surface-muted);
+  border-color: var(--border-strong);
+  color: var(--accent-strong);
 }
 
 .sidebar-head {
@@ -382,6 +421,19 @@ textarea {
   padding-top: 10px;
 }
 
+.tree-popout {
+  background: #faf8ff;
+  border: 1px solid var(--border);
+  box-shadow: 0 14px 32px rgba(36, 23, 71, 0.18);
+  height: calc(100vh - 54px);
+  left: 54px;
+  padding: 10px;
+  position: absolute;
+  top: 0;
+  width: 300px;
+  z-index: 20;
+}
+
 .brand {
   align-items: center;
   display: flex;
@@ -391,12 +443,6 @@ textarea {
 
 .brand > div {
   min-width: 0;
-}
-
-.brand p {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .mark {
@@ -549,7 +595,7 @@ small {
   color: var(--green);
 }
 
-.project-menu {
+.context-menu {
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: 4px;
@@ -561,18 +607,18 @@ small {
   z-index: 20;
 }
 
-.project-menu button {
+.context-menu button {
   background: transparent;
   border-color: transparent;
   justify-content: flex-start;
   min-width: 120px;
 }
 
-.project-menu button:hover {
+.context-menu button:hover {
   background: var(--accent-soft);
 }
 
-.project-menu button.danger:hover {
+.context-menu button.danger:hover {
   background: var(--danger-soft);
   color: var(--danger);
 }
@@ -620,18 +666,6 @@ small {
   flex: none;
   height: 6px;
   width: 6px;
-}
-
-.git {
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
-}
-
-.git pre {
-  color: #423a5b;
-  max-height: 140px;
-  overflow: auto;
-  white-space: pre-wrap;
 }
 
 .workspace {

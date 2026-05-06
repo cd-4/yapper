@@ -77,6 +77,15 @@ struct ProjectStore {
     projects: Vec<ProjectEntry>,
 }
 
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UiState {
+    sidebar_collapsed: bool,
+    root_path: Option<String>,
+    relative_path: Option<String>,
+    test_name: Option<String>,
+}
+
 fn config_dir() -> AppResult<PathBuf> {
     let home = env::var_os("HOME")
         .or_else(|| env::var_os("USERPROFILE"))
@@ -87,6 +96,10 @@ fn config_dir() -> AppResult<PathBuf> {
 
 fn projects_file() -> AppResult<PathBuf> {
     Ok(config_dir()?.join("projects.json"))
+}
+
+fn ui_state_file() -> AppResult<PathBuf> {
+    Ok(config_dir()?.join("ui-state.json"))
 }
 
 fn read_project_store() -> AppResult<ProjectStore> {
@@ -121,6 +134,29 @@ fn write_project_store(store: &ProjectStore) -> AppResult<()> {
     }
     let contents = serde_json::to_string_pretty(store)
         .map_err(|error| AppError::Message(format!("Could not save projects: {error}")))?;
+    fs::write(path, contents)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn load_ui_state() -> AppResult<UiState> {
+    let path = ui_state_file()?;
+    if !path.exists() {
+        return Ok(UiState::default());
+    }
+    let contents = fs::read_to_string(path)?;
+    serde_json::from_str(&contents)
+        .map_err(|error| AppError::Message(format!("Could not read UI state: {error}")))
+}
+
+#[tauri::command]
+fn save_ui_state(state: UiState) -> AppResult<()> {
+    let path = ui_state_file()?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let contents = serde_json::to_string_pretty(&state)
+        .map_err(|error| AppError::Message(format!("Could not save UI state: {error}")))?;
     fs::write(path, contents)?;
     Ok(())
 }
@@ -625,6 +661,8 @@ pub fn run() {
             create_sample_project,
             run_yapitest,
             git_status,
+            load_ui_state,
+            save_ui_state,
             list_projects,
             add_project,
             remove_project,
