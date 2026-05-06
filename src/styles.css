@@ -113,6 +113,93 @@ select {
   padding: 0 8px;
 }
 
+.themed-select {
+  min-width: 0;
+  position: relative;
+  width: 100%;
+}
+
+.themed-select-trigger {
+  background: #ffffff;
+  border: 1px solid #c3ccd5;
+  color: #17202b;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  height: 36px;
+  justify-content: initial;
+  padding: 0 9px 0 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.themed-select-trigger:hover,
+.themed-select-trigger[aria-expanded="true"] {
+  background: #fbfcfd;
+  border-color: #91a2b3;
+}
+
+.themed-select-trigger:focus-visible {
+  border-color: #15616d;
+  outline: 2px solid rgba(21, 97, 109, 0.2);
+  outline-offset: 1px;
+}
+
+.themed-select-trigger span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.themed-select-trigger svg {
+  color: #647282;
+}
+
+.themed-select-menu {
+  background: #ffffff;
+  border: 1px solid #b9c6d2;
+  border-radius: 6px;
+  box-shadow: 0 12px 24px rgba(23, 32, 43, 0.14);
+  display: flex;
+  flex-direction: column;
+  left: 0;
+  margin-top: 4px;
+  max-height: 220px;
+  min-width: 100%;
+  overflow: auto;
+  padding: 4px;
+  position: absolute;
+  top: 100%;
+  z-index: 30;
+}
+
+.themed-select-menu button {
+  background: transparent;
+  border-color: transparent;
+  border-radius: 4px;
+  color: #25313f;
+  display: block;
+  flex: none;
+  justify-content: flex-start;
+  min-height: 30px;
+  overflow: hidden;
+  padding: 0 8px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.themed-select-menu button:hover,
+.themed-select-menu button.active {
+  background: #e5f2f4;
+}
+
+.themed-select-menu button.selected {
+  color: #124d57;
+  font-weight: 700;
+}
+
 textarea {
   min-height: 120px;
   padding: 8px;
@@ -297,6 +384,13 @@ small {
   white-space: nowrap;
 }
 
+.tree-rename-input {
+  flex: 1;
+  min-height: 28px;
+  min-width: 0;
+  padding: 3px 7px;
+}
+
 .tree-row small {
   flex: none;
 }
@@ -345,6 +439,10 @@ small {
 }
 
 .project-menu button:hover {
+  background: #e5f2f4;
+}
+
+.project-menu button:last-child:hover {
   background: #f9e0dc;
   color: #b42318;
 }

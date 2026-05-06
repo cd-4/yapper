@@ -48,9 +48,27 @@ struct GitStatus {
     output: String,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
+struct ProjectEntry {
+    root: String,
+    display_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum StoredProjectEntry {
+    Path(String),
+    Entry(ProjectEntry),
+}
+
+#[derive(Deserialize)]
+struct StoredProjectStore {
+    projects: Vec<StoredProjectEntry>,
+}
+
+#[derive(Serialize)]
 struct ProjectStore {
-    projects: Vec<String>,
+    projects: Vec<ProjectEntry>,
 }
 
 fn config_dir() -> AppResult<PathBuf> {
@@ -73,8 +91,21 @@ fn read_project_store() -> AppResult<ProjectStore> {
         });
     }
     let contents = fs::read_to_string(path)?;
-    serde_json::from_str(&contents)
-        .map_err(|error| AppError::Message(format!("Could not read saved projects: {error}")))
+    let stored: StoredProjectStore = serde_json::from_str(&contents)
+        .map_err(|error| AppError::Message(format!("Could not read saved projects: {error}")))?;
+    Ok(ProjectStore {
+        projects: stored
+            .projects
+            .into_iter()
+            .map(|project| match project {
+                StoredProjectEntry::Path(root) => ProjectEntry {
+                    root,
+                    display_name: None,
+                },
+                StoredProjectEntry::Entry(project) => project,
+            })
+            .collect(),
+    })
 }
 
 fn write_project_store(store: &ProjectStore) -> AppResult<()> {
@@ -89,24 +120,44 @@ fn write_project_store(store: &ProjectStore) -> AppResult<()> {
 }
 
 #[tauri::command]
-fn list_projects() -> AppResult<Vec<String>> {
+fn list_projects() -> AppResult<Vec<ProjectEntry>> {
     Ok(read_project_store()?.projects)
 }
 
 #[tauri::command]
-fn add_project(root: String) -> AppResult<Vec<String>> {
+fn add_project(root: String) -> AppResult<Vec<ProjectEntry>> {
     let root = normalize_root(&root)?.to_string_lossy().to_string();
     let mut store = read_project_store()?;
-    store.projects.retain(|project| project != &root);
-    store.projects.push(root);
+    let existing = store.projects.iter().find(|project| project.root == root).cloned();
+    store.projects.retain(|project| project.root != root);
+    store.projects.push(existing.unwrap_or(ProjectEntry {
+        root,
+        display_name: None,
+    }));
     write_project_store(&store)?;
     Ok(store.projects)
 }
 
 #[tauri::command]
-fn remove_project(root: String) -> AppResult<Vec<String>> {
+fn remove_project(root: String) -> AppResult<Vec<ProjectEntry>> {
     let mut store = read_project_store()?;
-    store.projects.retain(|project| project != &root);
+    store.projects.retain(|project| project.root != root);
+    write_project_store(&store)?;
+    Ok(store.projects)
+}
+
+#[tauri::command]
+fn rename_project(root: String, display_name: String) -> AppResult<Vec<ProjectEntry>> {
+    let mut store = read_project_store()?;
+    let display_name = display_name.trim();
+    let Some(project) = store.projects.iter_mut().find(|project| project.root == root) else {
+        return Err(AppError::Message("Project is not saved".into()));
+    };
+    project.display_name = if display_name.is_empty() {
+        None
+    } else {
+        Some(display_name.to_string())
+    };
     write_project_store(&store)?;
     Ok(store.projects)
 }
@@ -439,7 +490,8 @@ pub fn run() {
             git_status,
             list_projects,
             add_project,
-            remove_project
+            remove_project,
+            rename_project
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

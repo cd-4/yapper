@@ -538,30 +538,48 @@ export function extractReferenceCatalog(contents: string): ReferenceCatalog {
 
   let section = "";
   let currentStepSet = "";
+  let inStepSetOutput = false;
 
   for (const rawLine of contents.split("\n")) {
     const line = rawLine.replace(/\t/g, "  ");
-    const top = line.match(/^([A-Za-z0-9_-]+):\s*$/);
-    if (top) {
-      section = top[1];
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    const indent = lineIndent(line);
+    const pair = yamlPair(trimmed);
+    if (!pair) continue;
+
+    if (indent === 0) {
+      section = pair.key;
       currentStepSet = "";
+      inStepSetOutput = false;
       continue;
     }
 
-    const output = line.match(/^      ([A-Za-z0-9_-]+):/);
-    if (section === "step-sets" && currentStepSet && output) {
-      catalog.outputs.push(`$${currentStepSet}.${output[1]}`);
+    if (section === "vars" && indent === 2) {
+      catalog.vars.push(`$vars.${pair.key}`);
       continue;
     }
 
-    const secondLevel = line.match(/^  ([A-Za-z0-9_-]+):/);
-    if (!secondLevel) continue;
+    if (section === "urls" && indent === 2) {
+      catalog.urls.push(`$urls.${pair.key}`);
+      continue;
+    }
 
-    if (section === "vars") catalog.vars.push(`$vars.${secondLevel[1]}`);
-    if (section === "urls") catalog.urls.push(`$urls.${secondLevel[1]}`);
-    if (section === "step-sets") {
-      currentStepSet = secondLevel[1];
+    if (section === "step-sets" && indent === 2) {
+      currentStepSet = pair.key;
+      inStepSetOutput = false;
       catalog.stepSets.push(currentStepSet);
+      continue;
+    }
+
+    if (section === "step-sets" && currentStepSet && indent === 4) {
+      inStepSetOutput = pair.key === "output";
+      continue;
+    }
+
+    if (section === "step-sets" && currentStepSet && inStepSetOutput && indent === 6) {
+      catalog.outputs.push(`$${currentStepSet}.${pair.key}`);
     }
   }
 
