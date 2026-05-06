@@ -236,6 +236,14 @@ export function replaceTestDraft(contents: string, originalTestName: string, dra
   return `${[...lines.slice(0, range.start), ...replacement, ...lines.slice(range.end)].join("\n").trimEnd()}\n`;
 }
 
+export function removeTestDraft(contents: string, testName: string) {
+  const range = findTestRange(contents, testName);
+  if (!range) return null;
+
+  const lines = contents.split("\n");
+  return `${[...lines.slice(0, range.start), ...lines.slice(range.end)].join("\n").trimEnd()}\n`;
+}
+
 function readNestedBlock(lines: string[], startIndex: number, baseIndent: number) {
   const block = [];
   for (const line of lines.slice(startIndex + 1)) {
