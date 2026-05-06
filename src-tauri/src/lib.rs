@@ -381,6 +381,21 @@ fn yaml_test_names(contents: &str) -> Vec<String> {
     tests
 }
 
+fn is_config_yaml(contents: &str) -> bool {
+    contents
+        .lines()
+        .map(|line| line.replace('\t', "  "))
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') || indentation(&line) != 0 {
+                None
+            } else {
+                yaml_key(trimmed).map(str::to_string)
+            }
+        })
+        .any(|key| matches!(key.as_str(), "vars" | "urls" | "step-sets"))
+}
+
 fn collect_yaml(root: &Path, dir: &Path, files: &mut Vec<FileEntry>) -> AppResult<()> {
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
@@ -409,15 +424,14 @@ fn collect_yaml(root: &Path, dir: &Path, files: &mut Vec<FileEntry>) -> AppResul
             .to_string_lossy()
             .replace('\\', "/");
 
-        let kind = if file_name == "config.yaml" || file_name == "config.yml" {
+        let contents = fs::read_to_string(&path).unwrap_or_default();
+        let kind = if file_name == "config.yaml" || file_name == "config.yml" || is_config_yaml(&contents) {
             "config"
         } else {
             "test"
         };
         let tests = if kind == "test" {
-            fs::read_to_string(&path)
-                .map(|contents| yaml_test_names(&contents))
-                .unwrap_or_default()
+            yaml_test_names(&contents)
         } else {
             Vec::new()
         };

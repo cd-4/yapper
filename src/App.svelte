@@ -59,6 +59,7 @@
   let directories: DirectoryEntry[] = [];
   let files: FileEntry[] = [];
   let selected: FileEntry | null = null;
+  let selectedRelativePath = "";
   let selectedTestKey = "";
   let editor = "";
   let original = "";
@@ -199,7 +200,7 @@
     return {
       sidebarCollapsed,
       rootPath: rootPath || null,
-      relativePath: selected?.relative_path || editingTest?.file.relative_path || null,
+      relativePath: selected?.relative_path || editingTest?.file.relative_path || selectedRelativePath || null,
       testName: selectedTestKey ? selectedTestKey.split("#").slice(1).join("#") || null : null,
       ...overrides,
     };
@@ -250,6 +251,7 @@
     rootPath = path;
     treeMenu = { type: "none", left: 0, top: 0 };
     selected = null;
+    selectedRelativePath = "";
     selectedTestKey = "";
     editingTest = null;
     if (!rootPath.trim()) {
@@ -452,6 +454,7 @@
       directories = [];
       files = [];
       selected = null;
+      selectedRelativePath = "";
       selectedTestKey = "";
       if (projects.length > 0) await loadProject(projects[projects.length - 1].root);
       else saveUiState({ rootPath: null, relativePath: null, testName: null });
@@ -624,6 +627,7 @@
     );
     if (selectedPath === from || selectedPath.startsWith(`${from}/`)) {
       selected = null;
+      selectedRelativePath = "";
       selectedTestKey = "";
       editingTest = null;
     }
@@ -649,6 +653,7 @@
 
     if (selectedPath === path || selectedPath.startsWith(`${path}/`)) {
       selected = null;
+      selectedRelativePath = "";
       selectedTestKey = "";
       editingTest = null;
       editor = "";
@@ -686,6 +691,7 @@
       selectedTestKey = "";
       editingTest = null;
       selected = null;
+      selectedRelativePath = "";
       editor = "";
       original = "";
     }
@@ -721,6 +727,7 @@
   async function selectTest(file: FileEntry, testName: string) {
     selectFromCollapsedTree();
     selected = file;
+    selectedRelativePath = file.relative_path;
     selectedTestKey = `${file.relative_path}#${testName}`;
     const contents = await call<string>("read_yaml_file", {
       root: rootPath.trim(),
@@ -769,6 +776,7 @@
 
   async function selectFile(file: FileEntry) {
     selected = file;
+    selectedRelativePath = file.relative_path;
     selectedTestKey = "";
     editingTest = null;
     const contents = await call<string>("read_yaml_file", {
@@ -826,6 +834,7 @@
       const file = files.find((item) => item.relative_path === activeFilePath);
       if (file) {
         selected = file;
+        selectedRelativePath = file.relative_path;
         editingTest = { file, originalName: currentName };
       }
       editor = buildTestYaml(draft);
@@ -845,12 +854,16 @@
   }
 
   function showBuilder() {
-    if (selected?.kind === "config") {
+    const activeFile = selected || files.find((file) => file.relative_path === currentUiState().relativePath);
+    if (activeFile?.kind === "config") {
+      selected = activeFile;
+      selectedRelativePath = activeFile.relative_path;
       showConfig();
       return;
     }
     if (view === "builder") return;
     selected = null;
+    selectedRelativePath = "";
     selectedTestKey = "";
     editingTest = null;
     editor = generatedYaml;
