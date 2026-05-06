@@ -8,6 +8,7 @@
     Plus,
     Trash2,
   } from "lucide-svelte";
+  import ThemedSelect from "./ThemedSelect.svelte";
   import type { StepDraft } from "./types";
 
   type SuggestionMenu = {
@@ -101,10 +102,15 @@
           : step.stepId || step.path || "Request"}
       </small>
     </h3>
-    <select bind:value={step.type} on:change={onChange}>
-      <option value="request">Request</option>
-      <option value="reference">Config step set</option>
-    </select>
+    <ThemedSelect
+      bind:value={step.type}
+      ariaLabel="Step type"
+      onSelect={onChange}
+      options={[
+        { value: "request", label: "Request" },
+        { value: "reference", label: "Config step set" },
+      ]}
+    />
     <button
       class="icon-button danger-button"
       on:click={() => onRemoveStep(step.uid)}
@@ -126,21 +132,25 @@
     <div class="grid reference-grid">
       <label class="field">
         <span>Step set</span>
-        <select bind:value={step.referenceName} on:change={onChange}>
-          <option value="">Select step set</option>
-          {#each stepSets as stepSet}
-            <option value={stepSet}>{stepSet}</option>
-          {/each}
-        </select>
+        <ThemedSelect
+          bind:value={step.referenceName}
+          ariaLabel="Step set"
+          onSelect={onChange}
+          options={[
+            { value: "", label: "Select step set" },
+            ...stepSets.map((stepSet) => ({ value: stepSet, label: stepSet })),
+          ]}
+        />
       </label>
     </div>
   {:else}
     <div class="request-line">
-      <select bind:value={step.method} on:change={onChange}>
-        {#each ["GET", "POST", "PUT", "PATCH", "DELETE"] as method}
-          <option>{method}</option>
-        {/each}
-      </select>
+      <ThemedSelect
+        bind:value={step.method}
+        ariaLabel="HTTP method"
+        onSelect={onChange}
+        options={["GET", "POST", "PUT", "PATCH", "DELETE"].map((method) => ({ value: method, label: method }))}
+      />
       <div class="suggest-wrap">
         <input
           bind:value={step.path}

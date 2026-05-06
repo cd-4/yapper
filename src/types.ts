@@ -18,6 +18,11 @@ export type GitStatus = {
   output: string;
 };
 
+export type ProjectEntry = {
+  root: string;
+  display_name: string | null;
+};
+
 export type HeaderRow = {
   id: string;
   name: string;
