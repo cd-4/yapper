@@ -1,6 +1,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { open } from "@tauri-apps/plugin-dialog";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import { onMount } from "svelte";
   import {
     ChevronDown,
@@ -9,12 +10,15 @@
     Folder,
     FolderOpen,
     FolderTree,
+    Maximize,
+    Minus,
     PanelLeftClose,
     PanelLeftOpen,
     Play,
     Plus,
     Save,
     Trash2,
+    X,
   } from "lucide-svelte";
   import StepEditor from "./StepEditor.svelte";
   import ThemedSelect from "./ThemedSelect.svelte";
@@ -135,6 +139,31 @@
     } finally {
       busy = false;
     }
+  }
+
+  function appWindow() {
+    try {
+      return getCurrentWindow();
+    } catch {
+      return null;
+    }
+  }
+
+  function startWindowDrag(event: MouseEvent) {
+    if (event.button !== 0 || event.detail > 1) return;
+    void appWindow()?.startDragging();
+  }
+
+  function toggleWindowMaximize() {
+    void appWindow()?.toggleMaximize();
+  }
+
+  function minimizeWindow() {
+    void appWindow()?.minimize();
+  }
+
+  function closeWindow() {
+    void appWindow()?.close();
   }
 
   onMount(() => {
@@ -898,6 +927,39 @@
   }
 </script>
 
+<div class="app-frame">
+  <header class="titlebar">
+    <button
+      class="titlebar-drag"
+      on:mousedown={startWindowDrag}
+      on:dblclick={toggleWindowMaximize}
+      aria-label="Move window"
+    >
+      <span class="titlebar-brand">
+        <span class="titlebar-mark">B</span>
+        <span>Yapper</span>
+      </span>
+      <span class="titlebar-context">
+        {#if rootPath}
+          <span>{rootPath}</span>
+        {:else}
+          <span>No repository open</span>
+        {/if}
+      </span>
+    </button>
+    <div class="window-controls" aria-label="Window controls">
+      <button class="window-control" on:click={minimizeWindow} aria-label="Minimize window" title="Minimize">
+        <Minus size={15} />
+      </button>
+      <button class="window-control" on:click={toggleWindowMaximize} aria-label="Maximize window" title="Maximize">
+        <Maximize size={14} />
+      </button>
+      <button class="window-control close-control" on:click={closeWindow} aria-label="Close window" title="Close">
+        <X size={15} />
+      </button>
+    </div>
+  </header>
+
 <main class="shell" class:sidebar-collapsed={sidebarCollapsed}>
   <aside class="sidebar" aria-label="Repository browser">
     <div class="sidebar-head">
@@ -1465,3 +1527,4 @@
     </section>
   </section>
 </main>
+</div>

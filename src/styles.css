@@ -213,10 +213,121 @@ textarea {
   line-height: 1.5;
 }
 
+.app-frame {
+  background: #eef1f4;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.titlebar {
+  align-items: center;
+  background: #ffffff;
+  border-bottom: 1px solid #d4dbe2;
+  color: #1d252f;
+  display: grid;
+  flex: none;
+  grid-template-columns: minmax(0, 1fr) auto;
+  height: 38px;
+  min-height: 38px;
+  user-select: none;
+}
+
+.titlebar-drag {
+  align-items: center;
+  align-self: stretch;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: inherit;
+  cursor: default;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  justify-content: initial;
+  min-height: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.titlebar-drag:hover {
+  background: transparent;
+}
+
+.titlebar-drag:focus-visible {
+  outline: 2px solid rgba(21, 97, 109, 0.28);
+  outline-offset: -2px;
+}
+
+.titlebar-brand {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 190px;
+  padding: 0 10px;
+}
+
+.titlebar-mark {
+  align-items: center;
+  background: #15616d;
+  border-radius: 5px;
+  color: #ffffff;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 800;
+  height: 22px;
+  justify-content: center;
+  width: 22px;
+}
+
+.titlebar-brand span:last-child {
+  font-weight: 700;
+}
+
+.titlebar-context {
+  color: #647282;
+  min-width: 0;
+  text-align: center;
+}
+
+.titlebar-context span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.window-controls {
+  align-items: stretch;
+  align-self: stretch;
+  display: flex;
+}
+
+.window-control {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: #536171;
+  min-height: 0;
+  padding: 0;
+  width: 44px;
+}
+
+.window-control:hover {
+  background: #eef4f7;
+  color: #17202b;
+}
+
+.close-control:hover {
+  background: #d92d20;
+  color: #ffffff;
+}
+
 .shell {
   display: grid;
   grid-template-columns: 300px 1fr;
-  height: 100vh;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -229,7 +340,7 @@ textarea {
   border-right: 1px solid #d4dbe2;
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
   min-width: 0;
   overflow: hidden;
   padding: 10px;
@@ -507,7 +618,7 @@ small {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  height: 100vh;
+  height: 100%;
   min-width: 0;
   overflow: auto;
   padding: 12px;
@@ -918,6 +1029,18 @@ small {
 }
 
 @media (max-width: 860px) {
+  .app-frame {
+    min-width: 0;
+  }
+
+  .titlebar-brand {
+    min-width: 0;
+  }
+
+  .titlebar-context {
+    display: none;
+  }
+
   .shell,
   .grid,
   .split,
