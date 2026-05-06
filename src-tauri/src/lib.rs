@@ -486,6 +486,22 @@ fn rename_path(root: String, from: String, to: String) -> AppResult<()> {
 }
 
 #[tauri::command]
+fn delete_path(root: String, relative_path: String) -> AppResult<()> {
+    let root = normalize_root(&root)?;
+    let relative_path = normalized_relative_path(&relative_path)?;
+    let path = safe_join(&root, &relative_path)?;
+    if !path.exists() {
+        return Err(AppError::Message(format!("{relative_path} does not exist")));
+    }
+    if path.is_dir() {
+        fs::remove_dir_all(path)?;
+    } else {
+        fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn create_sample_project(root: String) -> AppResult<()> {
     let root = normalize_root(&root)?;
     let config = safe_join(&root, "api-tests/config.yaml")?;
@@ -605,6 +621,7 @@ pub fn run() {
             create_directory,
             create_test_file,
             rename_path,
+            delete_path,
             create_sample_project,
             run_yapitest,
             git_status,
