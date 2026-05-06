@@ -25,10 +25,12 @@
     mergeCatalogs,
     parseConfigDraft,
     parseTestDraft,
+    removeTestDraft,
     replaceTestDraft,
   } from "./yaml";
   import type {
     ConfigDraft,
+    DirectoryEntry,
     FileEntry,
     GitStatus,
     OutputDraft,
@@ -44,6 +46,7 @@
 
   let rootPath = "";
   let projects: ProjectEntry[] = [];
+  let directories: DirectoryEntry[] = [];
   let files: FileEntry[] = [];
   let selected: FileEntry | null = null;
   let selectedTestKey = "";
@@ -62,8 +65,14 @@
   let expandedTree: Record<string, boolean> = {};
   let sidebarCollapsed = false;
   let editingTest: { file: FileEntry; originalName: string } | null = null;
-  let projectMenu = { path: "", left: 0, top: 0 };
+  let treeMenu:
+    | { type: "none"; left: 0; top: 0 }
+    | { type: "project"; path: string; left: number; top: number }
+    | { type: "dir"; path: string; left: number; top: number }
+    | { type: "file"; file: FileEntry; left: number; top: number }
+    | { type: "test"; file: FileEntry; name: string; left: number; top: number } = { type: "none", left: 0, top: 0 };
   let renamingProject = { path: "", name: "" };
+  let renamingTreePath = { from: "", name: "" };
   let projectLongPressTimer: ReturnType<typeof setTimeout> | null = null;
   let suppressProjectClickPath = "";
   let suggestionMenu = {
@@ -112,11 +121,18 @@
   $: filteredFiles = files.filter((file) =>
     file.relative_path.toLowerCase().includes(filter.toLowerCase()),
   );
-  $: treeRows = buildTreeRows(filteredFiles, expandedTree);
+  $: filteredDirectories = directories.filter(
+    (directory) =>
+      !filter.trim() || directory.relative_path.toLowerCase().includes(filter.toLowerCase()),
+  );
+  $: treeRows = buildTreeRows(filteredFiles, filteredDirectories, expandedTree);
   $: dirty = editor !== original;
   $: generatedYaml = buildTestYaml(draft);
   $: generatedConfigYaml = buildConfigYaml(configDraft);
   $: suggestions = view === "config" ? buildConfigSuggestions(configDraft, catalog) : buildSuggestions(draft, catalog);
+  $: treeMenuPath = treeMenu.type === "project" || treeMenu.type === "dir" ? treeMenu.path : "";
+  $: treeMenuFile = treeMenu.type === "file" ? treeMenu.file : null;
+  $: treeMenuTest = treeMenu.type === "test" ? treeMenu : null;
   $: if (view === "builder") {
     editor = generatedYaml;
   }
@@ -137,11 +153,28 @@
     }
   }
 
+  function shouldUseNativeContextMenu(target: EventTarget | null) {
+    const element = target instanceof Element ? target : null;
+    if (!element) return false;
+    return Boolean(element.closest("input, textarea, select, [contenteditable='true'], [contenteditable='']"));
+  }
+
   onMount(() => {
     void loadProjects();
-    const closeProjectMenu = () => (projectMenu = { path: "", left: 0, top: 0 });
-    window.addEventListener("click", closeProjectMenu);
-    return () => window.removeEventListener("click", closeProjectMenu);
+    const closeTreeMenu = () => {
+      treeMenu = { type: "none", left: 0, top: 0 };
+    };
+    const suppressWebviewContextMenu = (event: MouseEvent) => {
+      if (event.defaultPrevented || shouldUseNativeContextMenu(event.target)) return;
+      event.preventDefault();
+      closeTreeMenu();
+    };
+    window.addEventListener("click", closeTreeMenu);
+    window.addEventListener("contextmenu", suppressWebviewContextMenu);
+    return () => {
+      window.removeEventListener("click", closeTreeMenu);
+      window.removeEventListener("contextmenu", suppressWebviewContextMenu);
+    };
   });
 
   async function loadProjects() {
@@ -151,7 +184,7 @@
 
   async function loadProject(path: string) {
     rootPath = path;
-    projectMenu = { path: "", left: 0, top: 0 };
+    treeMenu = { type: "none", left: 0, top: 0 };
     selected = null;
     selectedTestKey = "";
     editingTest = null;
@@ -159,6 +192,7 @@
       message = "Enter the path to a Git repository or API test folder.";
       return;
     }
+    directories = await call<DirectoryEntry[]>("list_directories", { root: rootPath.trim() });
     files = await call<FileEntry[]>("scan_repository", { root: rootPath.trim() });
     gitStatus = await call<GitStatus>("git_status", { root: rootPath.trim() });
     await refreshCatalog();
@@ -168,6 +202,15 @@
 
   async function scan() {
     await loadProject(rootPath);
+  }
+
+  async function refreshRepositoryTree() {
+    if (!rootPath.trim()) return;
+    directories = await call<DirectoryEntry[]>("list_directories", { root: rootPath.trim() });
+    files = await call<FileEntry[]>("scan_repository", { root: rootPath.trim() });
+    gitStatus = await call<GitStatus>("git_status", { root: rootPath.trim() });
+    await refreshCatalog();
+    expandDefaultTree();
   }
 
   async function chooseRoot() {
@@ -191,8 +234,20 @@
     files: FileEntry[];
   };
 
-  function buildTreeRows(items: FileEntry[], expanded: Record<string, boolean>): TreeRow[] {
+  function buildTreeRows(
+    items: FileEntry[],
+    directoryItems: DirectoryEntry[],
+    expanded: Record<string, boolean>,
+  ): TreeRow[] {
     const root: DirectoryNode = { dirs: new Map(), files: [] };
+
+    for (const directory of directoryItems) {
+      let node = root;
+      for (const part of directory.relative_path.split("/").filter(Boolean)) {
+        if (!node.dirs.has(part)) node.dirs.set(part, { dirs: new Map(), files: [] });
+        node = node.dirs.get(part)!;
+      }
+    }
 
     for (const file of items) {
       const parts = file.relative_path.split("/");
@@ -286,15 +341,35 @@
   }
 
   function openProjectMenu(event: MouseEvent, path: string) {
+    if (shouldUseNativeContextMenu(event.target)) return;
     event.preventDefault();
-    projectMenu = { path, left: event.clientX, top: event.clientY };
+    treeMenu = { type: "project", path, left: event.clientX, top: event.clientY };
+  }
+
+  function openDirectoryMenu(event: MouseEvent, path: string) {
+    if (shouldUseNativeContextMenu(event.target)) return;
+    event.preventDefault();
+    treeMenu = { type: "dir", path, left: event.clientX, top: event.clientY };
+  }
+
+  function openFileMenu(event: MouseEvent, file: FileEntry) {
+    if (shouldUseNativeContextMenu(event.target)) return;
+    event.preventDefault();
+    treeMenu = { type: "file", file, left: event.clientX, top: event.clientY };
+  }
+
+  function openTestMenu(event: MouseEvent, file: FileEntry, name: string) {
+    if (shouldUseNativeContextMenu(event.target)) return;
+    event.preventDefault();
+    treeMenu = { type: "test", file, name, left: event.clientX, top: event.clientY };
   }
 
   async function removeSavedProject(path: string) {
     projects = await call<ProjectEntry[]>("remove_project", { root: path });
-    projectMenu = { path: "", left: 0, top: 0 };
+    treeMenu = { type: "none", left: 0, top: 0 };
     if (rootPath === path) {
       rootPath = "";
+      directories = [];
       files = [];
       selected = null;
       selectedTestKey = "";
@@ -313,7 +388,7 @@
 
   function startProjectRename(project: ProjectEntry) {
     cancelProjectLongPress();
-    projectMenu = { path: "", left: 0, top: 0 };
+    treeMenu = { type: "none", left: 0, top: 0 };
     renamingProject = { path: project.root, name: projectName(project) };
   }
 
@@ -328,6 +403,29 @@
 
   function cancelProjectRename() {
     renamingProject = { path: "", name: "" };
+  }
+
+  function startTreeRename(path: string) {
+    treeMenu = { type: "none", left: 0, top: 0 };
+    renamingTreePath = { from: path, name: baseName(path) };
+  }
+
+  async function saveTreeRename() {
+    if (!renamingTreePath.from) return;
+
+    const from = renamingTreePath.from;
+    const requested = renamingTreePath.name.trim();
+    renamingTreePath = { from: "", name: "" };
+    if (!requested) return;
+
+    const to = requested.includes("/") || requested.includes("\\") ? cleanRelativePath(requested) : joinPath(parentPath(from), requested);
+    if (!to || to === from) return;
+
+    await performTreeRename(from, to);
+  }
+
+  function cancelTreeRename() {
+    renamingTreePath = { from: "", name: "" };
   }
 
   function startProjectLongPress(event: PointerEvent, project: ProjectEntry) {
@@ -351,6 +449,186 @@
       return;
     }
     void loadProject(project.root);
+  }
+
+  const cleanRelativePath = (path: string) =>
+    path
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/^\/+/, "")
+      .replace(/\/+$/, "");
+
+  function parentPath(path: string) {
+    return path.split("/").slice(0, -1).join("/");
+  }
+
+  function baseName(path: string) {
+    const parts = path.split("/").filter(Boolean);
+    return parts[parts.length - 1] || path;
+  }
+
+  function joinPath(parent: string, child: string) {
+    return [parent, child].filter(Boolean).join("/");
+  }
+
+  function fileNameToTestName(name: string) {
+    return name.replace(/\.(ya?ml)$/i, "").replace(/[^a-zA-Z0-9_-]+/g, "-") || "new-api-test";
+  }
+
+  function nextTestName(file: FileEntry) {
+    const existing = new Set(file.tests);
+    let index = file.tests.length + 1;
+    let name = "new-api-test";
+    while (existing.has(name)) {
+      name = `new-api-test-${index}`;
+      index += 1;
+    }
+    return name;
+  }
+
+  function newTestDraft(testName: string): TestDraft {
+    return {
+      testName,
+      setupName: "",
+      cleanupName: "",
+      steps: [newRequestStep()],
+    };
+  }
+
+  async function createTreeDirectory(parent = "") {
+    const initial = joinPath(parent, "new-directory");
+    const requested = window.prompt("Directory path", initial);
+    const relativePath = requested ? cleanRelativePath(requested) : "";
+    if (!relativePath) return;
+    await call("create_directory", { root: rootPath.trim(), relativePath });
+    expandedTree = { ...expandedTree, [parent]: true, [relativePath]: true };
+    treeMenu = { type: "none", left: 0, top: 0 };
+    await refreshRepositoryTree();
+    message = `Created ${relativePath}`;
+  }
+
+  async function createTreeTestFile(parent = "") {
+    const initial = joinPath(parent, "new-test.yaml");
+    const requested = window.prompt("Test file path", initial);
+    const relativePath = requested ? cleanRelativePath(requested) : "";
+    if (!relativePath) return;
+    const testName = fileNameToTestName(baseName(relativePath));
+    await call("create_test_file", {
+      root: rootPath.trim(),
+      relativePath,
+      contents: `${buildTestYaml(newTestDraft(testName)).trimEnd()}\n`,
+    });
+    expandedTree = { ...expandedTree, [parentPath(relativePath)]: true, [relativePath]: true };
+    treeMenu = { type: "none", left: 0, top: 0 };
+    await refreshRepositoryTree();
+    const file = files.find((item) => item.relative_path === relativePath);
+    if (file) await selectTest(file, testName);
+    message = `Created ${relativePath}`;
+  }
+
+  async function performTreeRename(from: string, to: string) {
+    const selectedPath = selected?.relative_path || "";
+    await call("rename_path", { root: rootPath.trim(), from, to });
+    treeMenu = { type: "none", left: 0, top: 0 };
+    expandedTree = Object.fromEntries(
+      Object.entries(expandedTree).map(([key, value]) => [
+        key === from || key.startsWith(`${from}/`) ? `${to}${key.slice(from.length)}` : key,
+        value,
+      ]),
+    );
+    if (selectedPath === from || selectedPath.startsWith(`${from}/`)) {
+      selected = null;
+      selectedTestKey = "";
+      editingTest = null;
+    }
+    await refreshRepositoryTree();
+    const renamedSelectedPath =
+      selectedPath === from || selectedPath.startsWith(`${from}/`) ? `${to}${selectedPath.slice(from.length)}` : to;
+    const renamedFile = files.find((item) => item.relative_path === renamedSelectedPath);
+    if (renamedFile) await selectFile(renamedFile);
+    message = `Renamed ${from} to ${to}`;
+  }
+
+  function renameTreePath(path: string) {
+    startTreeRename(path);
+  }
+
+  async function deleteTreePath(path: string) {
+    const confirmed = window.confirm(`Delete ${path} from disk? This cannot be undone.`);
+    if (!confirmed) return;
+
+    const selectedPath = selected?.relative_path || "";
+    await call("delete_path", { root: rootPath.trim(), relativePath: path });
+    treeMenu = { type: "none", left: 0, top: 0 };
+
+    if (selectedPath === path || selectedPath.startsWith(`${path}/`)) {
+      selected = null;
+      selectedTestKey = "";
+      editingTest = null;
+      editor = "";
+      original = "";
+    }
+
+    await refreshRepositoryTree();
+    if (!selected && files.length > 0) await selectFile(files[0]);
+    message = `Deleted ${path}`;
+  }
+
+  async function deleteTreeTest(file: FileEntry, testName: string) {
+    const confirmed = window.confirm(`Delete test "${testName}" from ${file.relative_path}? This cannot be undone.`);
+    if (!confirmed) return;
+
+    const contents = await call<string>("read_yaml_file", {
+      root: rootPath.trim(),
+      relativePath: file.relative_path,
+    });
+    const nextContents = removeTestDraft(contents, testName);
+    if (nextContents === null) {
+      message = `Could not find ${testName} in ${file.relative_path}`;
+      return;
+    }
+
+    await call("write_yaml_file", {
+      root: rootPath.trim(),
+      relativePath: file.relative_path,
+      contents: nextContents,
+    });
+    treeMenu = { type: "none", left: 0, top: 0 };
+
+    if (selectedTestKey === `${file.relative_path}#${testName}`) {
+      selectedTestKey = "";
+      editingTest = null;
+      selected = null;
+      editor = "";
+      original = "";
+    }
+
+    await refreshRepositoryTree();
+    const updatedFile = files.find((item) => item.relative_path === file.relative_path);
+    if (updatedFile) await selectFile(updatedFile);
+    message = `Deleted ${testName} from ${file.relative_path}`;
+  }
+
+  async function addTestToFile(file: FileEntry) {
+    const requested = window.prompt("Test name", nextTestName(file));
+    const testName = requested?.trim() || "";
+    if (!testName) return;
+    const contents = await call<string>("read_yaml_file", {
+      root: rootPath.trim(),
+      relativePath: file.relative_path,
+    });
+    const nextContents = `${contents.trimEnd()}\n\n${buildTestYaml(newTestDraft(testName)).trimEnd()}\n`;
+    await call("write_yaml_file", {
+      root: rootPath.trim(),
+      relativePath: file.relative_path,
+      contents: nextContents,
+    });
+    expandedTree = { ...expandedTree, [file.relative_path]: true };
+    treeMenu = { type: "none", left: 0, top: 0 };
+    await refreshRepositoryTree();
+    const updatedFile = files.find((item) => item.relative_path === file.relative_path);
+    if (updatedFile) await selectTest(updatedFile, testName);
+    message = `Added ${testName} to ${file.relative_path}`;
   }
 
   async function selectTest(file: FileEntry, testName: string) {
@@ -1006,7 +1284,15 @@
               {#if rootPath === project.root && projectExpanded}
                 {#each treeRows as row (row.key)}
                   {#if row.type === "dir"}
-                    <div class="tree-row" style:padding-left={`${row.depth * 16 + 4}px`}>
+                    {@const isRenamingPath = renamingTreePath.from === row.key}
+                    <div
+                      class="tree-row"
+                      role="treeitem"
+                      aria-selected="false"
+                      tabindex="-1"
+                      style:padding-left={`${row.depth * 16 + 4}px`}
+                      on:contextmenu={(event) => openDirectoryMenu(event, row.key)}
+                    >
                       <button
                         class="tree-toggle"
                         aria-label={row.expanded ? "Collapse folder" : "Expand folder"}
@@ -1024,9 +1310,32 @@
                       {:else}
                         <Folder size={15} />
                       {/if}
-                      <button class="tree-label" on:click={() => toggleTree(row.key, row.expanded)}>
-                        <span>{row.name}</span>
-                      </button>
+                      {#if isRenamingPath}
+                        <input
+                          class="tree-rename-input"
+                          bind:value={renamingTreePath.name}
+                          aria-label="Directory name"
+                          on:click|stopPropagation
+                          on:pointerdown|stopPropagation
+                          on:blur={saveTreeRename}
+                          on:keydown={(event) => {
+                            if (event.key === "Enter") {
+                              event.currentTarget.blur();
+                            } else if (event.key === "Escape") {
+                              cancelTreeRename();
+                            }
+                          }}
+                          use:focusOnMount
+                        />
+                      {:else}
+                        <button
+                          class="tree-label"
+                          on:click={() => toggleTree(row.key, row.expanded)}
+                          on:dblclick|stopPropagation={() => startTreeRename(row.key)}
+                        >
+                          <span>{row.name}</span>
+                        </button>
+                      {/if}
                       <button
                         class="tree-run-button"
                         on:click|stopPropagation={() => runDirectory(row.key)}
@@ -1038,10 +1347,15 @@
                       </button>
                     </div>
                   {:else if row.type === "file"}
+                    {@const isRenamingPath = renamingTreePath.from === row.file.relative_path}
                     <div
                       class="tree-row"
                       class:active={selected?.relative_path === row.file.relative_path && !selectedTestKey}
+                      role="treeitem"
+                      aria-selected={selected?.relative_path === row.file.relative_path && !selectedTestKey}
+                      tabindex="-1"
                       style:padding-left={`${row.depth * 16 + 4}px`}
+                      on:contextmenu={(event) => openFileMenu(event, row.file)}
                     >
                       {#if row.file.tests.length}
                         <button
@@ -1060,10 +1374,32 @@
                         <span class="tree-spacer"></span>
                       {/if}
                       <FileText size={15} />
-                      <button class="tree-label" on:click={() => toggleTreeFile(row.file, row.expanded)}>
-                        <span>{row.file.name}</span>
-                      </button>
-                      <small>{row.file.kind}</small>
+                      {#if isRenamingPath}
+                        <input
+                          class="tree-rename-input"
+                          bind:value={renamingTreePath.name}
+                          aria-label="File name"
+                          on:click|stopPropagation
+                          on:pointerdown|stopPropagation
+                          on:blur={saveTreeRename}
+                          on:keydown={(event) => {
+                            if (event.key === "Enter") {
+                              event.currentTarget.blur();
+                            } else if (event.key === "Escape") {
+                              cancelTreeRename();
+                            }
+                          }}
+                          use:focusOnMount
+                        />
+                      {:else}
+                        <button
+                          class="tree-label"
+                          on:click={() => toggleTreeFile(row.file, row.expanded)}
+                          on:dblclick|stopPropagation={() => startTreeRename(row.file.relative_path)}
+                        >
+                          <span>{row.file.name}</span>
+                        </button>
+                      {/if}
                       {#if row.file.kind === "test"}
                         <button
                           class="tree-run-button"
@@ -1080,7 +1416,11 @@
                     <div
                       class="tree-row test-row"
                       class:active={selectedTestKey === row.key}
+                      role="treeitem"
+                      aria-selected={selectedTestKey === row.key}
+                      tabindex="-1"
                       style:padding-left={`${row.depth * 16 + 22}px`}
+                      on:contextmenu={(event) => openTestMenu(event, row.file, row.name)}
                     >
                       <span class="tree-test-dot"></span>
                       <button class="tree-label" on:click={() => selectTest(row.file, row.name)}>
@@ -1101,26 +1441,51 @@
               {/if}
             {/each}
           {/if}
-          {#if projectMenu.path}
+          {#if treeMenu.type !== "none"}
             <div
               class="project-menu"
               role="menu"
-              style:left={`${projectMenu.left}px`}
-              style:top={`${projectMenu.top}px`}
+              style:left={`${treeMenu.left}px`}
+              style:top={`${treeMenu.top}px`}
               tabindex="-1"
               on:click|stopPropagation
               on:keydown|stopPropagation
             >
-              <button
-                role="menuitem"
-                on:click={() => {
-                  const project = projects.find((project) => project.root === projectMenu.path);
-                  if (project) startProjectRename(project);
-                }}
-              >
-                Rename
-              </button>
-              <button role="menuitem" on:click={() => removeSavedProject(projectMenu.path)}>Remove</button>
+              {#if treeMenu.type === "project"}
+                <button role="menuitem" on:click={() => createTreeDirectory()}>New Directory</button>
+                <button role="menuitem" on:click={() => createTreeTestFile()}>New Test File</button>
+                <button
+                  role="menuitem"
+                  on:click={() => {
+                    const project = projects.find((project) => project.root === treeMenuPath);
+                    if (project) startProjectRename(project);
+                  }}
+                >
+                  Rename Project
+                </button>
+                <button role="menuitem" class="danger" on:click={() => removeSavedProject(treeMenuPath)}>Remove</button>
+              {:else if treeMenu.type === "dir"}
+                <button role="menuitem" on:click={() => createTreeDirectory(treeMenuPath)}>New Directory</button>
+                <button role="menuitem" on:click={() => createTreeTestFile(treeMenuPath)}>New Test File</button>
+                <button role="menuitem" on:click={() => renameTreePath(treeMenuPath)}>Rename</button>
+                <button role="menuitem" class="danger" on:click={() => deleteTreePath(treeMenuPath)}>Delete</button>
+              {:else if treeMenu.type === "file"}
+                {#if treeMenuFile?.kind === "test"}
+                  <button role="menuitem" on:click={() => treeMenuFile && addTestToFile(treeMenuFile)}>Add Test</button>
+                {/if}
+                <button role="menuitem" on:click={() => treeMenuFile && renameTreePath(treeMenuFile.relative_path)}>Rename</button>
+                <button role="menuitem" class="danger" on:click={() => treeMenuFile && deleteTreePath(treeMenuFile.relative_path)}>
+                  Delete
+                </button>
+              {:else if treeMenu.type === "test"}
+                <button
+                  role="menuitem"
+                  class="danger"
+                  on:click={() => treeMenuTest && deleteTreeTest(treeMenuTest.file, treeMenuTest.name)}
+                >
+                  Delete
+                </button>
+              {/if}
             </div>
           {/if}
         </nav>
