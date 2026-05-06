@@ -1,6 +1,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { open } from "@tauri-apps/plugin-dialog";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import { onMount } from "svelte";
   import {
     ChevronDown,
@@ -9,12 +10,15 @@
     Folder,
     FolderOpen,
     FolderTree,
+    Maximize,
+    Minus,
     PanelLeftClose,
     PanelLeftOpen,
     Play,
     Plus,
     Save,
     Trash2,
+    X,
   } from "lucide-svelte";
   import StepEditor from "./StepEditor.svelte";
   import ThemedSelect from "./ThemedSelect.svelte";
@@ -32,7 +36,6 @@
     ConfigDraft,
     DirectoryEntry,
     FileEntry,
-    GitStatus,
     OutputDraft,
     ProjectEntry,
     ReferenceCatalog,
@@ -44,17 +47,24 @@
     VariableDraft,
   } from "./types";
 
+  type UiState = {
+    sidebarCollapsed: boolean;
+    rootPath: string | null;
+    relativePath: string | null;
+    testName: string | null;
+  };
+
   let rootPath = "";
   let projects: ProjectEntry[] = [];
   let directories: DirectoryEntry[] = [];
   let files: FileEntry[] = [];
   let selected: FileEntry | null = null;
+  let selectedRelativePath = "";
   let selectedTestKey = "";
   let editor = "";
   let original = "";
   let output = "";
   let runResult: RunResult | null = null;
-  let gitStatus: GitStatus | null = null;
   let busy = false;
   let message = "";
   let view: "builder" | "yaml" | "config" = "builder";
@@ -64,6 +74,8 @@
   let dragOverStepUid = "";
   let expandedTree: Record<string, boolean> = {};
   let sidebarCollapsed = false;
+  let collapsedTreeOpen = false;
+  let runMenu = { open: false, left: 0, top: 0 };
   let editingTest: { file: FileEntry; originalName: string } | null = null;
   let treeMenu:
     | { type: "none"; left: 0; top: 0 }
@@ -153,16 +165,58 @@
     }
   }
 
+  function appWindow() {
+    try {
+      return getCurrentWindow();
+    } catch {
+      return null;
+    }
+  }
+
+  function startWindowDrag(event: MouseEvent) {
+    if (event.button !== 0 || event.detail > 1) return;
+    void appWindow()?.startDragging();
+  }
+
+  function toggleWindowMaximize() {
+    void appWindow()?.toggleMaximize();
+  }
+
+  function minimizeWindow() {
+    void appWindow()?.minimize();
+  }
+
+  function closeWindow() {
+    void appWindow()?.close();
+  }
+
   function shouldUseNativeContextMenu(target: EventTarget | null) {
     const element = target instanceof Element ? target : null;
     if (!element) return false;
     return Boolean(element.closest("input, textarea, select, [contenteditable='true'], [contenteditable='']"));
   }
 
+  function currentUiState(overrides: Partial<UiState> = {}): UiState {
+    return {
+      sidebarCollapsed,
+      rootPath: rootPath || null,
+      relativePath: selected?.relative_path || editingTest?.file.relative_path || selectedRelativePath || null,
+      testName: selectedTestKey ? selectedTestKey.split("#").slice(1).join("#") || null : null,
+      ...overrides,
+    };
+  }
+
+  function saveUiState(overrides: Partial<UiState> = {}) {
+    void invoke("save_ui_state", { state: currentUiState(overrides) }).catch((error) => {
+      console.error("Could not save UI state", error);
+    });
+  }
+
   onMount(() => {
-    void loadProjects();
+    void restoreSession();
     const closeTreeMenu = () => {
       treeMenu = { type: "none", left: 0, top: 0 };
+      runMenu = { open: false, left: 0, top: 0 };
     };
     const suppressWebviewContextMenu = (event: MouseEvent) => {
       if (event.defaultPrevented || shouldUseNativeContextMenu(event.target)) return;
@@ -177,15 +231,27 @@
     };
   });
 
-  async function loadProjects() {
-    projects = await call<ProjectEntry[]>("list_projects");
-    if (!rootPath && projects.length > 0) await loadProject(projects[projects.length - 1].root);
+  async function restoreSession() {
+    const savedState = await invoke<UiState>("load_ui_state").catch(() => currentUiState());
+    sidebarCollapsed = savedState.sidebarCollapsed;
+    await loadProjects(savedState);
   }
 
-  async function loadProject(path: string) {
+  async function loadProjects(savedState: UiState | null = null) {
+    projects = await call<ProjectEntry[]>("list_projects");
+    if (rootPath || projects.length === 0) return;
+
+    const savedProject = savedState?.rootPath
+      ? projects.find((project) => project.root === savedState.rootPath)
+      : null;
+    await loadProject(savedProject?.root || projects[projects.length - 1].root, savedState);
+  }
+
+  async function loadProject(path: string, savedState: UiState | null = null) {
     rootPath = path;
     treeMenu = { type: "none", left: 0, top: 0 };
     selected = null;
+    selectedRelativePath = "";
     selectedTestKey = "";
     editingTest = null;
     if (!rootPath.trim()) {
@@ -194,10 +260,21 @@
     }
     directories = await call<DirectoryEntry[]>("list_directories", { root: rootPath.trim() });
     files = await call<FileEntry[]>("scan_repository", { root: rootPath.trim() });
-    gitStatus = await call<GitStatus>("git_status", { root: rootPath.trim() });
     await refreshCatalog();
     expandDefaultTree();
-    if (!selected && files.length > 0) await selectFile(files[0]);
+    const restoredFile =
+      savedState?.rootPath === rootPath && savedState.relativePath
+        ? files.find((file) => file.relative_path === savedState.relativePath)
+        : null;
+    if (restoredFile && savedState?.testName && restoredFile.tests.includes(savedState.testName)) {
+      await selectTest(restoredFile, savedState.testName);
+    } else if (restoredFile) {
+      await selectFile(restoredFile);
+    } else if (!selected && files.length > 0) {
+      await selectFile(files[0]);
+    } else {
+      saveUiState({ rootPath, relativePath: null, testName: null });
+    }
   }
 
   async function scan() {
@@ -208,7 +285,6 @@
     if (!rootPath.trim()) return;
     directories = await call<DirectoryEntry[]>("list_directories", { root: rootPath.trim() });
     files = await call<FileEntry[]>("scan_repository", { root: rootPath.trim() });
-    gitStatus = await call<GitStatus>("git_status", { root: rootPath.trim() });
     await refreshCatalog();
     expandDefaultTree();
   }
@@ -317,6 +393,12 @@
     expandedTree = { ...expandedTree, [key]: !expanded };
   }
 
+  function setSidebarCollapsed(collapsed: boolean) {
+    sidebarCollapsed = collapsed;
+    if (!collapsed) collapsedTreeOpen = false;
+    saveUiState({ sidebarCollapsed: collapsed });
+  }
+
   function focusOnMount(node: HTMLInputElement) {
     requestAnimationFrame(() => {
       node.focus();
@@ -372,10 +454,15 @@
       directories = [];
       files = [];
       selected = null;
+      selectedRelativePath = "";
       selectedTestKey = "";
-      gitStatus = null;
       if (projects.length > 0) await loadProject(projects[projects.length - 1].root);
+      else saveUiState({ rootPath: null, relativePath: null, testName: null });
     }
+  }
+
+  function selectFromCollapsedTree() {
+    if (sidebarCollapsed) collapsedTreeOpen = false;
   }
 
   function toggleTreeFile(file: FileEntry, expanded: boolean) {
@@ -383,6 +470,7 @@
       toggleTree(file.relative_path, expanded);
       return;
     }
+    selectFromCollapsedTree();
     void selectFile(file);
   }
 
@@ -448,6 +536,7 @@
       suppressProjectClickPath = "";
       return;
     }
+    selectFromCollapsedTree();
     void loadProject(project.root);
   }
 
@@ -538,6 +627,7 @@
     );
     if (selectedPath === from || selectedPath.startsWith(`${from}/`)) {
       selected = null;
+      selectedRelativePath = "";
       selectedTestKey = "";
       editingTest = null;
     }
@@ -563,6 +653,7 @@
 
     if (selectedPath === path || selectedPath.startsWith(`${path}/`)) {
       selected = null;
+      selectedRelativePath = "";
       selectedTestKey = "";
       editingTest = null;
       editor = "";
@@ -571,6 +662,7 @@
 
     await refreshRepositoryTree();
     if (!selected && files.length > 0) await selectFile(files[0]);
+    else if (!selected) saveUiState({ relativePath: null, testName: null });
     message = `Deleted ${path}`;
   }
 
@@ -599,6 +691,7 @@
       selectedTestKey = "";
       editingTest = null;
       selected = null;
+      selectedRelativePath = "";
       editor = "";
       original = "";
     }
@@ -632,7 +725,9 @@
   }
 
   async function selectTest(file: FileEntry, testName: string) {
+    selectFromCollapsedTree();
     selected = file;
+    selectedRelativePath = file.relative_path;
     selectedTestKey = `${file.relative_path}#${testName}`;
     const contents = await call<string>("read_yaml_file", {
       root: rootPath.trim(),
@@ -652,7 +747,11 @@
     editor = buildTestYaml(parsed);
     original = editor;
     view = "builder";
-    message = `Opened ${testName} from ${file.relative_path}`;
+    saveUiState({
+      rootPath,
+      relativePath: file.relative_path,
+      testName,
+    });
   }
 
   async function refreshCatalog() {
@@ -677,6 +776,7 @@
 
   async function selectFile(file: FileEntry) {
     selected = file;
+    selectedRelativePath = file.relative_path;
     selectedTestKey = "";
     editingTest = null;
     const contents = await call<string>("read_yaml_file", {
@@ -691,6 +791,11 @@
     } else {
       view = "yaml";
     }
+    saveUiState({
+      rootPath,
+      relativePath: file.relative_path,
+      testName: null,
+    });
   }
 
   async function save() {
@@ -729,11 +834,17 @@
       const file = files.find((item) => item.relative_path === activeFilePath);
       if (file) {
         selected = file;
+        selectedRelativePath = file.relative_path;
         editingTest = { file, originalName: currentName };
       }
       editor = buildTestYaml(draft);
       original = editor;
       view = "builder";
+      saveUiState({
+        rootPath,
+        relativePath: activeFilePath,
+        testName: currentName,
+      });
       message = `Saved ${currentName} in ${activeFilePath}`;
       return activeFilePath;
     }
@@ -743,12 +854,16 @@
   }
 
   function showBuilder() {
-    if (selected?.kind === "config") {
+    const activeFile = selected || files.find((file) => file.relative_path === currentUiState().relativePath);
+    if (activeFile?.kind === "config") {
+      selected = activeFile;
+      selectedRelativePath = activeFile.relative_path;
       showConfig();
       return;
     }
     if (view === "builder") return;
     selected = null;
+    selectedRelativePath = "";
     selectedTestKey = "";
     editingTest = null;
     editor = generatedYaml;
@@ -866,6 +981,36 @@
     const relativePath = await saveDraft();
     if (!relativePath) return;
     await runYapitest(relativePath, draft.testName.trim() || "new-api-test");
+  }
+
+  async function runCurrentTest() {
+    runMenu = { open: false, left: 0, top: 0 };
+    await runDraft();
+  }
+
+  async function runCurrentYamlFile() {
+    runMenu = { open: false, left: 0, top: 0 };
+    const relativePath = selected?.relative_path || editingTest?.file.relative_path || "";
+    if (!relativePath) {
+      message = "Select a YAML file before running it.";
+      return;
+    }
+    await runYapitest(relativePath);
+  }
+
+  async function runCurrentProject() {
+    runMenu = { open: false, left: 0, top: 0 };
+    if (!rootPath) {
+      message = "Open a project before running it.";
+      return;
+    }
+    await runYapitest(undefined, undefined, rootPath);
+  }
+
+  function openRunMenu(event: MouseEvent) {
+    if (shouldUseNativeContextMenu(event.target)) return;
+    event.preventDefault();
+    runMenu = { open: true, left: event.clientX, top: event.clientY };
   }
 
   function touchDraft() {
@@ -1176,34 +1321,102 @@
   }
 </script>
 
-<main class="shell" class:sidebar-collapsed={sidebarCollapsed}>
-  <aside class="sidebar" aria-label="Repository browser">
-    <div class="sidebar-head">
-      <div class="brand">
-        <span class="mark">B</span>
-        {#if !sidebarCollapsed}
-          <div>
-            <h1>Yapper</h1>
-            <p>YAML API tests for Git repositories</p>
-          </div>
-        {/if}
-      </div>
-      <button
-        class="icon-button"
-        on:click={() => (sidebarCollapsed = !sidebarCollapsed)}
-        aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-        title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-      >
-        {#if sidebarCollapsed}
-          <PanelLeftOpen size={18} />
+<div class="app-frame">
+  <header class="titlebar">
+    <button
+      class="titlebar-drag"
+      on:mousedown={startWindowDrag}
+      on:dblclick={toggleWindowMaximize}
+      aria-label="Move window"
+    >
+      <span class="titlebar-brand">
+        <span class="titlebar-mark">B</span>
+        <span>Yapper</span>
+      </span>
+      <span class="titlebar-context">
+        {#if rootPath}
+          <span>{rootPath}</span>
         {:else}
-          <PanelLeftClose size={18} />
+          <span>No repository open</span>
         {/if}
+      </span>
+    </button>
+    <div class="window-controls" aria-label="Window controls">
+      <button class="window-control" on:click={minimizeWindow} aria-label="Minimize window" title="Minimize">
+        <Minus size={15} />
+      </button>
+      <button class="window-control" on:click={toggleWindowMaximize} aria-label="Maximize window" title="Maximize">
+        <Maximize size={14} />
+      </button>
+      <button class="window-control close-control" on:click={closeWindow} aria-label="Close window" title="Close">
+        <X size={15} />
       </button>
     </div>
+  </header>
 
-    {#if !sidebarCollapsed}
-      <div class="sidebar-body">
+<main class="shell" class:sidebar-collapsed={sidebarCollapsed}>
+  <aside class="sidebar" aria-label="Repository browser">
+    {#if sidebarCollapsed}
+      <div class="collapsed-rail">
+        <span class="rail-mark" aria-hidden="true">B</span>
+        <button
+          class="icon-button rail-button"
+          on:click={() => setSidebarCollapsed(false)}
+          aria-label="Expand sidebar"
+          title="Expand sidebar"
+        >
+          <PanelLeftOpen size={18} />
+        </button>
+        <button
+          class="icon-button rail-button run-button"
+          on:click={runCurrentTest}
+          on:contextmenu={openRunMenu}
+          disabled={busy || !rootPath}
+          aria-label="Run current test"
+          title="Run current test"
+        >
+          <Play size={18} />
+        </button>
+        <button
+          class="icon-button rail-button"
+          on:click={chooseRoot}
+          disabled={busy}
+          aria-label="Open project"
+          title="Open project"
+        >
+          <FolderOpen size={18} />
+        </button>
+        <button
+          class="icon-button rail-button"
+          class:active={collapsedTreeOpen}
+          on:click={() => (collapsedTreeOpen = !collapsedTreeOpen)}
+          aria-label="Show tree view"
+          title="Show tree view"
+        >
+          <FolderTree size={18} />
+        </button>
+      </div>
+    {:else}
+      <div class="sidebar-head">
+        <div class="brand">
+          <span class="mark">B</span>
+          <div>
+            <h1>Yapper</h1>
+          </div>
+        </div>
+        <button
+          class="icon-button"
+          on:click={() => setSidebarCollapsed(true)}
+          aria-label="Collapse sidebar"
+          title="Collapse sidebar"
+        >
+          <PanelLeftClose size={18} />
+        </button>
+      </div>
+    {/if}
+
+    {#if !sidebarCollapsed || collapsedTreeOpen}
+      <div class="sidebar-body" class:tree-popout={sidebarCollapsed}>
         <button class="open-root-button" on:click={chooseRoot} disabled={busy}>Open</button>
 
         <input class="search" bind:value={filter} placeholder="Filter YAML files" />
@@ -1443,7 +1656,7 @@
           {/if}
           {#if treeMenu.type !== "none"}
             <div
-              class="project-menu"
+              class="context-menu"
               role="menu"
               style:left={`${treeMenu.left}px`}
               style:top={`${treeMenu.top}px`}
@@ -1489,13 +1702,21 @@
             </div>
           {/if}
         </nav>
-
-        {#if gitStatus}
-          <section class="git">
-            <h2>Git</h2>
-            <pre>{gitStatus.available ? gitStatus.output || "Working tree clean" : "Git unavailable"}</pre>
-          </section>
-        {/if}
+      </div>
+    {/if}
+    {#if runMenu.open}
+      <div
+        class="context-menu"
+        role="menu"
+        style:left={`${runMenu.left}px`}
+        style:top={`${runMenu.top}px`}
+        tabindex="-1"
+        on:click|stopPropagation
+        on:keydown|stopPropagation
+      >
+        <button role="menuitem" on:click={runCurrentTest} disabled={busy || !rootPath}>Run Current Test</button>
+        <button role="menuitem" on:click={runCurrentYamlFile} disabled={busy || !selected}>Run YAML File</button>
+        <button role="menuitem" on:click={runCurrentProject} disabled={busy || !rootPath}>Run Project</button>
       </div>
     {/if}
   </aside>
@@ -1504,7 +1725,6 @@
     <header class="topbar">
       <div>
         <h2>{selected ? selected.relative_path : "Request Builder"}</h2>
-        <p>{dirty ? "Unsaved YAML changes" : "Collections and configs are plain repository files"}</p>
       </div>
       <div class="top-actions">
         {#if view === "config"}
@@ -1830,3 +2050,4 @@
     </section>
   </section>
 </main>
+</div>
