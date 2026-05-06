@@ -681,7 +681,6 @@
     editor = buildTestYaml(parsed);
     original = editor;
     view = "builder";
-    message = `Opened ${testName} from ${file.relative_path}`;
   }
 
   async function refreshCatalog() {
@@ -1566,7 +1565,6 @@
     <header class="topbar">
       <div>
         <h2>{selected ? selected.relative_path : "Request Builder"}</h2>
-        <p>{dirty ? "Unsaved YAML changes" : "Collections and configs are plain repository files"}</p>
       </div>
       <div class="top-actions">
         {#if view === "config"}

@@ -1,21 +1,22 @@
 :root {
-  color: #1b2028;
-  background: #f4f1ea;
-  --bg: #f4f1ea;
-  --surface: #fffdf8;
-  --surface-muted: #f7f2e8;
-  --surface-strong: #27232c;
-  --border: #d4cabc;
-  --border-strong: #b8aa99;
-  --text: #1b2028;
-  --muted: #70695f;
-  --accent: #c76a2b;
-  --accent-soft: #f4ddc8;
-  --green: #2f7a4f;
-  --green-soft: #dcebd9;
-  --danger: #b83f35;
-  --danger-soft: #f2d7d2;
-  --focus: rgba(199, 106, 43, 0.28);
+  color: #1e1b2e;
+  background: #f4f2ff;
+  --bg: #f4f2ff;
+  --surface: #ffffff;
+  --surface-muted: #eee9ff;
+  --surface-strong: #241747;
+  --border: #cfc7ec;
+  --border-strong: #a99bd5;
+  --text: #1e1b2e;
+  --muted: #675f7b;
+  --accent: #f2c94c;
+  --accent-strong: #6f4bd8;
+  --accent-soft: #ffffff;
+  --green: #217a63;
+  --green-soft: #d9eee7;
+  --danger: #c2415d;
+  --danger-soft: #f6d7df;
+  --focus: rgba(242, 201, 76, 0.44);
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
@@ -57,7 +58,7 @@ button:hover {
 }
 
 button:disabled {
-  color: #9d9488;
+  color: #9a91af;
   cursor: not-allowed;
 }
 
@@ -175,7 +176,7 @@ select {
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: 4px;
-  box-shadow: 0 14px 28px rgba(38, 32, 25, 0.16);
+  box-shadow: 0 14px 28px rgba(36, 23, 71, 0.16);
   display: flex;
   flex-direction: column;
   left: 0;
@@ -212,7 +213,7 @@ select {
 }
 
 .themed-select-menu button.selected {
-  color: #8c3f13;
+  color: var(--accent-strong);
   font-weight: 700;
 }
 
@@ -240,8 +241,8 @@ textarea {
 .titlebar {
   align-items: center;
   background: var(--surface-strong);
-  border-bottom: 1px solid #403949;
-  color: #fff8ec;
+  border-bottom: 1px solid #3b2671;
+  color: #ffffff;
   display: grid;
   flex: none;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -271,7 +272,7 @@ textarea {
 }
 
 .titlebar-drag:focus-visible {
-  outline: 2px solid rgba(244, 170, 95, 0.44);
+  outline: 2px solid var(--focus);
   outline-offset: -2px;
 }
 
@@ -287,7 +288,7 @@ textarea {
   align-items: center;
   background: var(--accent);
   border-radius: 3px;
-  color: #ffffff;
+  color: #241747;
   display: inline-flex;
   font-size: 12px;
   font-weight: 800;
@@ -301,7 +302,7 @@ textarea {
 }
 
 .titlebar-context {
-  color: #c8bead;
+  color: #d8cef8;
   min-width: 0;
   text-align: center;
 }
@@ -323,15 +324,15 @@ textarea {
   background: transparent;
   border: 0;
   border-radius: 0;
-  color: #d8cfc0;
+  color: #ded5ff;
   min-height: 0;
   padding: 0;
   width: 44px;
 }
 
 .window-control:hover {
-  background: #393340;
-  color: #fff8ec;
+  background: #34215f;
+  color: #ffffff;
 }
 
 .close-control:hover {
@@ -352,7 +353,7 @@ textarea {
 }
 
 .sidebar {
-  background: #fbf7ef;
+  background: #faf8ff;
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -402,7 +403,7 @@ textarea {
   align-items: center;
   background: var(--accent);
   border-radius: 3px;
-  color: #ffffff;
+  color: #241747;
   display: inline-flex;
   font-weight: 800;
   height: 32px;
@@ -441,7 +442,7 @@ small {
 }
 
 .field span {
-  color: #675a4c;
+  color: #5f5282;
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
@@ -552,7 +553,7 @@ small {
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: 4px;
-  box-shadow: 0 12px 24px rgba(38, 32, 25, 0.18);
+  box-shadow: 0 12px 24px rgba(36, 23, 71, 0.18);
   display: flex;
   flex-direction: column;
   padding: 4px;
@@ -582,7 +583,7 @@ small {
 }
 
 .test-row {
-  color: #4d453b;
+  color: #423a5b;
   font-size: 13px;
 }
 
@@ -627,7 +628,7 @@ small {
 }
 
 .git pre {
-  color: #4d453b;
+  color: #423a5b;
   max-height: 140px;
   overflow: auto;
   white-space: pre-wrap;
@@ -657,7 +658,7 @@ small {
 }
 
 .tabs {
-  background: #e8dccd;
+  background: #e9e3ff;
   border-radius: 3px;
   display: flex;
   gap: 2px;
@@ -672,12 +673,12 @@ small {
 .tabs button.active {
   background: var(--surface);
   border-color: var(--border-strong);
-  color: #8c3f13;
+  color: var(--accent-strong);
 }
 
 .notice {
-  background: #fff0c8;
-  border: 1px solid #d6a936;
+  background: #ffffff;
+  border: 1px solid var(--border-strong);
   border-radius: 3px;
   padding: 8px 10px;
 }
@@ -700,7 +701,7 @@ small {
 
 .config-section-head {
   align-items: center;
-  border-top: 1px solid #e7ddcf;
+  border-top: 1px solid #e2dcf7;
   display: flex;
   justify-content: space-between;
   gap: 8px;
@@ -750,7 +751,7 @@ small {
 }
 
 .nested-step {
-  background: #faf4ea;
+  background: #fbf9ff;
   padding: 8px;
 }
 
@@ -783,7 +784,7 @@ small {
 }
 
 .step-card {
-  border: 1px solid #ded2c3;
+  border: 1px solid #ddd5f3;
   border-radius: 4px;
   padding: 9px;
 }
@@ -819,9 +820,9 @@ small {
 }
 
 .step-summary {
-  background: #f4eadc;
+  background: #f0ebff;
   border-radius: 3px;
-  color: #5d5145;
+  color: #51466f;
   padding: 7px 9px;
 }
 
@@ -842,7 +843,7 @@ small {
 }
 
 .step-section {
-  border-top: 1px solid #e7ddcf;
+  border-top: 1px solid #e2dcf7;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -881,7 +882,7 @@ small {
 }
 
 .section-head span {
-  color: #675a4c;
+  color: #5f5282;
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
@@ -923,7 +924,7 @@ small {
 }
 
 .assertion-subsection > span {
-  color: #675a4c;
+  color: #5f5282;
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
@@ -937,7 +938,7 @@ small {
 }
 
 .assertion-subsection-head span {
-  color: #675a4c;
+  color: #5f5282;
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
@@ -971,7 +972,7 @@ small {
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: 4px;
-  box-shadow: 0 12px 24px rgba(38, 32, 25, 0.16);
+  box-shadow: 0 12px 24px rgba(36, 23, 71, 0.16);
   display: flex;
   flex-direction: column;
   left: 0;
@@ -997,8 +998,8 @@ small {
 }
 
 .suggestions button.active {
-  background: #ead1ad;
-  color: #7a330e;
+  background: #ffffff;
+  color: #3f2a7c;
 }
 
 .split {
@@ -1017,9 +1018,9 @@ small {
 }
 
 .console pre {
-  background: #211d26;
+  background: #1f1738;
   border-radius: 3px;
-  color: #fff7e8;
+  color: #ffffff;
   overflow: auto;
   padding: 12px;
   white-space: pre-wrap;
