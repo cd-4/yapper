@@ -442,7 +442,7 @@ small {
   background: #e5f2f4;
 }
 
-.project-menu button:last-child:hover {
+.project-menu button.danger:hover {
   background: #f9e0dc;
   color: #b42318;
 }

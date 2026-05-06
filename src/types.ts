@@ -6,6 +6,11 @@ export type FileEntry = {
   tests: string[];
 };
 
+export type DirectoryEntry = {
+  relative_path: string;
+  name: string;
+};
+
 export type RunResult = {
   command: string;
   status: number | null;

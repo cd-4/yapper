@@ -35,6 +35,12 @@ struct FileEntry {
 }
 
 #[derive(Serialize)]
+struct DirectoryEntry {
+    relative_path: String,
+    name: String,
+}
+
+#[derive(Serialize)]
 struct RunResult {
     command: String,
     status: Option<i32>,
@@ -187,11 +193,61 @@ fn safe_join(root: &Path, relative_path: &str) -> AppResult<PathBuf> {
     Ok(root.join(relative))
 }
 
+fn normalized_relative_path(relative_path: &str) -> AppResult<String> {
+    let trimmed = relative_path.trim().trim_matches('/');
+    if trimmed.is_empty() {
+        return Err(AppError::Message("Path cannot be empty".into()));
+    }
+    safe_join(Path::new(""), trimmed)?;
+    Ok(trimmed.replace('\\', "/"))
+}
+
+fn ensure_yaml_path(relative_path: &str) -> AppResult<()> {
+    let extension = Path::new(relative_path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or_default();
+    if extension == "yaml" || extension == "yml" {
+        Ok(())
+    } else {
+        Err(AppError::Message("Test file must end in .yaml or .yml".into()))
+    }
+}
+
 fn is_ignored_dir(name: &str) -> bool {
     matches!(
         name,
         ".git" | "node_modules" | "target" | "dist" | ".svelte-kit" | ".tauri"
     )
+}
+
+fn collect_dirs(root: &Path, dir: &Path, directories: &mut Vec<DirectoryEntry>) -> AppResult<()> {
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let metadata = entry.metadata()?;
+        if !metadata.is_dir() {
+            continue;
+        }
+
+        let file_name = entry.file_name().to_string_lossy().to_string();
+        if is_ignored_dir(&file_name) {
+            continue;
+        }
+
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|_| AppError::Message("Could not resolve relative path".into()))?
+            .to_string_lossy()
+            .replace('\\', "/");
+
+        directories.push(DirectoryEntry {
+            relative_path: relative,
+            name: file_name,
+        });
+        collect_dirs(root, &path, directories)?;
+    }
+    Ok(())
 }
 
 fn yaml_key(line: &str) -> Option<&str> {
@@ -352,6 +408,15 @@ fn scan_repository(root: String) -> AppResult<Vec<FileEntry>> {
 }
 
 #[tauri::command]
+fn list_directories(root: String) -> AppResult<Vec<DirectoryEntry>> {
+    let root = normalize_root(&root)?;
+    let mut directories = Vec::new();
+    collect_dirs(&root, &root, &mut directories)?;
+    directories.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
+    Ok(directories)
+}
+
+#[tauri::command]
 fn read_yaml_file(root: String, relative_path: String) -> AppResult<String> {
     let root = normalize_root(&root)?;
     let path = safe_join(&root, &relative_path)?;
@@ -366,6 +431,57 @@ fn write_yaml_file(root: String, relative_path: String, contents: String) -> App
         fs::create_dir_all(parent)?;
     }
     fs::write(path, contents)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn create_directory(root: String, relative_path: String) -> AppResult<()> {
+    let root = normalize_root(&root)?;
+    let relative_path = normalized_relative_path(&relative_path)?;
+    let path = safe_join(&root, &relative_path)?;
+    if path.exists() {
+        return Err(AppError::Message(format!("{relative_path} already exists")));
+    }
+    fs::create_dir_all(path)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn create_test_file(root: String, relative_path: String, contents: String) -> AppResult<()> {
+    let root = normalize_root(&root)?;
+    let relative_path = normalized_relative_path(&relative_path)?;
+    ensure_yaml_path(&relative_path)?;
+    let path = safe_join(&root, &relative_path)?;
+    if path.exists() {
+        return Err(AppError::Message(format!("{relative_path} already exists")));
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, contents)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn rename_path(root: String, from: String, to: String) -> AppResult<()> {
+    let root = normalize_root(&root)?;
+    let from = normalized_relative_path(&from)?;
+    let to = normalized_relative_path(&to)?;
+    let from_path = safe_join(&root, &from)?;
+    let to_path = safe_join(&root, &to)?;
+    if !from_path.exists() {
+        return Err(AppError::Message(format!("{from} does not exist")));
+    }
+    if to_path.exists() {
+        return Err(AppError::Message(format!("{to} already exists")));
+    }
+    if from_path.is_file() {
+        ensure_yaml_path(&to)?;
+    }
+    if let Some(parent) = to_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::rename(from_path, to_path)?;
     Ok(())
 }
 
@@ -483,8 +599,12 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             scan_repository,
+            list_directories,
             read_yaml_file,
             write_yaml_file,
+            create_directory,
+            create_test_file,
+            rename_path,
             create_sample_project,
             run_yapitest,
             git_status,
