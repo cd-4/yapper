@@ -384,6 +384,13 @@ small {
   white-space: nowrap;
 }
 
+.tree-rename-input {
+  flex: 1;
+  min-height: 28px;
+  min-width: 0;
+  padding: 3px 7px;
+}
+
 .tree-row small {
   flex: none;
 }
@@ -432,6 +439,10 @@ small {
 }
 
 .project-menu button:hover {
+  background: #e5f2f4;
+}
+
+.project-menu button:last-child:hover {
   background: #f9e0dc;
   color: #b42318;
 }

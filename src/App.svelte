@@ -32,6 +32,7 @@
     FileEntry,
     GitStatus,
     OutputDraft,
+    ProjectEntry,
     ReferenceCatalog,
     RunResult,
     StepDraft,
@@ -42,7 +43,7 @@
   } from "./types";
 
   let rootPath = "";
-  let projects: string[] = [];
+  let projects: ProjectEntry[] = [];
   let files: FileEntry[] = [];
   let selected: FileEntry | null = null;
   let selectedTestKey = "";
@@ -62,6 +63,9 @@
   let sidebarCollapsed = false;
   let editingTest: { file: FileEntry; originalName: string } | null = null;
   let projectMenu = { path: "", left: 0, top: 0 };
+  let renamingProject = { path: "", name: "" };
+  let projectLongPressTimer: ReturnType<typeof setTimeout> | null = null;
+  let suppressProjectClickPath = "";
   let suggestionMenu = {
     key: "",
     index: 0,
@@ -141,8 +145,8 @@
   });
 
   async function loadProjects() {
-    projects = await call<string[]>("list_projects");
-    if (!rootPath && projects.length > 0) await loadProject(projects[projects.length - 1]);
+    projects = await call<ProjectEntry[]>("list_projects");
+    if (!rootPath && projects.length > 0) await loadProject(projects[projects.length - 1].root);
   }
 
   async function loadProject(path: string) {
@@ -173,8 +177,8 @@
       title: "Open repository",
     });
     if (typeof selectedPath !== "string") return;
-    projects = await call<string[]>("add_project", { root: selectedPath });
-    await loadProject(projects[projects.length - 1] || selectedPath);
+    projects = await call<ProjectEntry[]>("add_project", { root: selectedPath });
+    await loadProject(projects[projects.length - 1]?.root || selectedPath);
   }
 
   type TreeRow =
@@ -234,7 +238,9 @@
     return `project:${path}`;
   }
 
-  function projectName(path: string) {
+  function projectName(project: ProjectEntry) {
+    if (project.display_name?.trim()) return project.display_name;
+    const path = project.root;
     const parts = path.split(/[\\/]/).filter(Boolean);
     return parts[parts.length - 1] || path || "Repository";
   }
@@ -254,6 +260,13 @@
 
   function toggleTree(key: string, expanded: boolean) {
     expandedTree = { ...expandedTree, [key]: !expanded };
+  }
+
+  function focusOnMount(node: HTMLInputElement) {
+    requestAnimationFrame(() => {
+      node.focus();
+      node.select();
+    });
   }
 
   function runDirectory(path: string) {
@@ -278,7 +291,7 @@
   }
 
   async function removeSavedProject(path: string) {
-    projects = await call<string[]>("remove_project", { root: path });
+    projects = await call<ProjectEntry[]>("remove_project", { root: path });
     projectMenu = { path: "", left: 0, top: 0 };
     if (rootPath === path) {
       rootPath = "";
@@ -286,15 +299,58 @@
       selected = null;
       selectedTestKey = "";
       gitStatus = null;
-      if (projects.length > 0) await loadProject(projects[projects.length - 1]);
+      if (projects.length > 0) await loadProject(projects[projects.length - 1].root);
     }
   }
 
-  async function openTreeFile(file: FileEntry) {
+  function toggleTreeFile(file: FileEntry, expanded: boolean) {
     if (file.tests.length > 0) {
-      expandedTree = { ...expandedTree, [file.relative_path]: true };
+      toggleTree(file.relative_path, expanded);
+      return;
     }
-    await selectFile(file);
+    void selectFile(file);
+  }
+
+  function startProjectRename(project: ProjectEntry) {
+    cancelProjectLongPress();
+    projectMenu = { path: "", left: 0, top: 0 };
+    renamingProject = { path: project.root, name: projectName(project) };
+  }
+
+  async function saveProjectRename() {
+    if (!renamingProject.path) return;
+    projects = await call<ProjectEntry[]>("rename_project", {
+      root: renamingProject.path,
+      displayName: renamingProject.name,
+    });
+    renamingProject = { path: "", name: "" };
+  }
+
+  function cancelProjectRename() {
+    renamingProject = { path: "", name: "" };
+  }
+
+  function startProjectLongPress(event: PointerEvent, project: ProjectEntry) {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    cancelProjectLongPress();
+    projectLongPressTimer = setTimeout(() => {
+      suppressProjectClickPath = project.root;
+      startProjectRename(project);
+    }, 600);
+  }
+
+  function cancelProjectLongPress() {
+    if (!projectLongPressTimer) return;
+    clearTimeout(projectLongPressTimer);
+    projectLongPressTimer = null;
+  }
+
+  function handleProjectClick(project: ProjectEntry) {
+    if (suppressProjectClickPath === project.root) {
+      suppressProjectClickPath = "";
+      return;
+    }
+    void loadProject(project.root);
   }
 
   async function selectTest(file: FileEntry, testName: string) {
@@ -878,24 +934,29 @@
           {#if projects.length === 0}
             <div class="empty-tree">No Projects Found</div>
           {:else}
-            {#each projects as project (project)}
-              {@const projectExpanded = expandedTree[projectKey(project)] ?? true}
+            {#each projects as project (project.root)}
+              {@const projectExpanded = expandedTree[projectKey(project.root)] ?? true}
+              {@const isRenamingProject = renamingProject.path === project.root}
               <div
                 class="tree-row tree-root-row"
-                class:active={rootPath === project && !selected}
+                class:active={rootPath === project.root && !selected}
                 role="treeitem"
-                aria-selected={rootPath === project && !selected}
+                aria-selected={rootPath === project.root && !selected}
                 style:padding-left="4px"
                 tabindex="-1"
-                on:contextmenu={(event) => openProjectMenu(event, project)}
+                on:contextmenu={(event) => openProjectMenu(event, project.root)}
+                on:pointerdown={(event) => startProjectLongPress(event, project)}
+                on:pointerup={cancelProjectLongPress}
+                on:pointercancel={cancelProjectLongPress}
+                on:pointerleave={cancelProjectLongPress}
               >
                 <button
                   class="tree-toggle"
                   aria-label={projectExpanded ? "Collapse repository" : "Expand repository"}
                   aria-expanded={projectExpanded}
                   on:click={() => {
-                    if (rootPath !== project) void loadProject(project);
-                    toggleTree(projectKey(project), projectExpanded);
+                    if (rootPath !== project.root) void loadProject(project.root);
+                    toggleTree(projectKey(project.root), projectExpanded);
                   }}
                 >
                   {#if projectExpanded}
@@ -905,12 +966,35 @@
                   {/if}
                 </button>
                 <FolderTree size={15} />
-                <button class="tree-label" on:click={() => loadProject(project)}>
-                  <span>{projectName(project)}</span>
-                </button>
+                {#if isRenamingProject}
+                  <input
+                    class="tree-rename-input"
+                    bind:value={renamingProject.name}
+                    aria-label="Project name"
+                    on:click|stopPropagation
+                    on:pointerdown|stopPropagation
+                    on:blur={saveProjectRename}
+                    on:keydown={(event) => {
+                      if (event.key === "Enter") {
+                        event.currentTarget.blur();
+                      } else if (event.key === "Escape") {
+                        cancelProjectRename();
+                      }
+                    }}
+                    use:focusOnMount
+                  />
+                {:else}
+                  <button
+                    class="tree-label"
+                    on:click={() => handleProjectClick(project)}
+                    on:dblclick|stopPropagation={() => startProjectRename(project)}
+                  >
+                    <span>{projectName(project)}</span>
+                  </button>
+                {/if}
                 <button
                   class="tree-run-button"
-                  on:click|stopPropagation={() => runProject(project)}
+                  on:click|stopPropagation={() => runProject(project.root)}
                   disabled={busy}
                   aria-label="Run all tests"
                   title="Run all tests"
@@ -919,7 +1003,7 @@
                 </button>
               </div>
 
-              {#if rootPath === project && projectExpanded}
+              {#if rootPath === project.root && projectExpanded}
                 {#each treeRows as row (row.key)}
                   {#if row.type === "dir"}
                     <div class="tree-row" style:padding-left={`${row.depth * 16 + 4}px`}>
@@ -976,7 +1060,7 @@
                         <span class="tree-spacer"></span>
                       {/if}
                       <FileText size={15} />
-                      <button class="tree-label" on:click={() => openTreeFile(row.file)}>
+                      <button class="tree-label" on:click={() => toggleTreeFile(row.file, row.expanded)}>
                         <span>{row.file.name}</span>
                       </button>
                       <small>{row.file.kind}</small>
@@ -1027,6 +1111,15 @@
               on:click|stopPropagation
               on:keydown|stopPropagation
             >
+              <button
+                role="menuitem"
+                on:click={() => {
+                  const project = projects.find((project) => project.root === projectMenu.path);
+                  if (project) startProjectRename(project);
+                }}
+              >
+                Rename
+              </button>
               <button role="menuitem" on:click={() => removeSavedProject(projectMenu.path)}>Remove</button>
             </div>
           {/if}
