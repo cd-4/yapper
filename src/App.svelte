@@ -17,6 +17,7 @@
     Trash2,
   } from "lucide-svelte";
   import StepEditor from "./StepEditor.svelte";
+  import ThemedSelect from "./ThemedSelect.svelte";
   import {
     buildConfigYaml,
     buildTestYaml,
@@ -321,14 +322,21 @@
   }
 
   async function refreshCatalog() {
-    const configs = files.filter((file) => file.kind === "config");
     const catalogs: ReferenceCatalog[] = [];
-    for (const config of configs) {
+    for (const file of files) {
       const contents = await call<string>("read_yaml_file", {
         root: rootPath.trim(),
-        relativePath: config.relative_path,
+        relativePath: file.relative_path,
       });
-      catalogs.push(extractReferenceCatalog(contents));
+      const references = extractReferenceCatalog(contents);
+      if (
+        references.vars.length > 0 ||
+        references.urls.length > 0 ||
+        references.stepSets.length > 0 ||
+        references.outputs.length > 0
+      ) {
+        catalogs.push(references);
+      }
     }
     catalog = catalogs.length > 0 ? mergeCatalogs(catalogs) : emptyCatalog;
   }
@@ -1267,21 +1275,19 @@
           </label>
           <label class="field">
             <span>Setup</span>
-            <select bind:value={draft.setupName}>
-              <option value="">None</option>
-              {#each catalog.stepSets as stepSet}
-                <option value={stepSet}>{stepSet}</option>
-              {/each}
-            </select>
+            <ThemedSelect
+              bind:value={draft.setupName}
+              ariaLabel="Setup"
+              options={[{ value: "", label: "None" }, ...catalog.stepSets.map((stepSet) => ({ value: stepSet, label: stepSet }))]}
+            />
           </label>
           <label class="field">
             <span>Teardown</span>
-            <select bind:value={draft.cleanupName}>
-              <option value="">None</option>
-              {#each catalog.stepSets as stepSet}
-                <option value={stepSet}>{stepSet}</option>
-              {/each}
-            </select>
+            <ThemedSelect
+              bind:value={draft.cleanupName}
+              ariaLabel="Teardown"
+              options={[{ value: "", label: "None" }, ...catalog.stepSets.map((stepSet) => ({ value: stepSet, label: stepSet }))]}
+            />
           </label>
           <div class="step-buttons">
             <button class="icon-button" on:click={addStep} aria-label="Add step" title="Add step">
