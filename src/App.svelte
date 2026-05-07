@@ -74,6 +74,7 @@
   let dragOverStepUid = "";
   let expandedTree: Record<string, boolean> = {};
   let sidebarCollapsed = false;
+  let isMac = navigator.platform.toLowerCase().includes("mac");
   let collapsedTreeOpen = false;
   let runMenu = { open: false, left: 0, top: 0 };
   let editingTest: { file: FileEntry; originalName: string } | null = null;
@@ -1322,7 +1323,20 @@
 </script>
 
 <div class="app-frame">
-  <header class="titlebar">
+  <header class="titlebar" class:mac-titlebar={isMac}>
+    {#if isMac}
+      <div class="window-controls mac-window-controls" aria-label="Window controls">
+        <button class="window-control close-control" on:click={closeWindow} aria-label="Close window" title="Close">
+          <span aria-hidden="true"></span>
+        </button>
+        <button class="window-control minimize-control" on:click={minimizeWindow} aria-label="Minimize window" title="Minimize">
+          <span aria-hidden="true"></span>
+        </button>
+        <button class="window-control maximize-control" on:click={toggleWindowMaximize} aria-label="Maximize window" title="Maximize">
+          <span aria-hidden="true"></span>
+        </button>
+      </div>
+    {/if}
     <button
       class="titlebar-drag"
       on:mousedown={startWindowDrag}
@@ -1341,17 +1355,19 @@
         {/if}
       </span>
     </button>
-    <div class="window-controls" aria-label="Window controls">
-      <button class="window-control" on:click={minimizeWindow} aria-label="Minimize window" title="Minimize">
-        <Minus size={15} />
-      </button>
-      <button class="window-control" on:click={toggleWindowMaximize} aria-label="Maximize window" title="Maximize">
-        <Maximize size={14} />
-      </button>
-      <button class="window-control close-control" on:click={closeWindow} aria-label="Close window" title="Close">
-        <X size={15} />
-      </button>
-    </div>
+    {#if !isMac}
+      <div class="window-controls" aria-label="Window controls">
+        <button class="window-control" on:click={minimizeWindow} aria-label="Minimize window" title="Minimize">
+          <Minus size={15} />
+        </button>
+        <button class="window-control" on:click={toggleWindowMaximize} aria-label="Maximize window" title="Maximize">
+          <Maximize size={14} />
+        </button>
+        <button class="window-control close-control" on:click={closeWindow} aria-label="Close window" title="Close">
+          <X size={15} />
+        </button>
+      </div>
+    {/if}
   </header>
 
 <main class="shell" class:sidebar-collapsed={sidebarCollapsed}>
