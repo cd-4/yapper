@@ -21,6 +21,7 @@
     X,
   } from "lucide-svelte";
   import StepEditor from "./StepEditor.svelte";
+  import TestResults from "./TestResults.svelte";
   import ThemedSelect from "./ThemedSelect.svelte";
   import {
     buildConfigYaml,
@@ -63,7 +64,7 @@
   let selectedTestKey = "";
   let editor = "";
   let original = "";
-  let output = "";
+  let testRunning = false;
   let runResult: RunResult | null = null;
   let busy = false;
   let message = "";
@@ -969,13 +970,19 @@
   }
 
   async function runYapitest(target?: string, testName?: string, rootOverride?: string) {
-    output = "Running yapitest...\n";
+    testRunning = true;
+    runResult = null;
     runResult = await call<RunResult>("run_yapitest", {
       root: (rootOverride || rootPath).trim(),
       target: target || null,
       testName: testName || null,
     });
-    output = [runResult.command, "", runResult.stdout, runResult.stderr].filter(Boolean).join("\n");
+    testRunning = false;
+  }
+
+  function handleNavigate(e: CustomEvent<{ filePath: string; testName: string }>) {
+    const file = files.find((f) => f.relative_path === e.detail.filePath);
+    if (file) selectTest(file, e.detail.testName);
   }
 
   async function runDraft() {
@@ -1738,6 +1745,7 @@
   </aside>
 
   <section class="workspace">
+    <div class="workspace-content">
     <header class="topbar">
       <div>
         <h2>{selected ? selected.relative_path : "Request Builder"}</h2>
@@ -2055,15 +2063,10 @@
       </section>
     {/if}
 
-    <section class="console">
-      <div>
-        <h3>Run Output</h3>
-        {#if runResult}
-          <span class:fail={runResult.status !== 0}>exit {runResult.status ?? "unknown"}</span>
-        {/if}
-      </div>
-      <pre>{output || "No yapitest run yet."}</pre>
-    </section>
+    </div>
+    {#if runResult || testRunning}
+      <TestResults {runResult} running={testRunning} on:navigate={handleNavigate} />
+    {/if}
   </section>
 </main>
 </div>

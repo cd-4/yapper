@@ -1,0 +1,90 @@
+<h2>Tree layout options</h2>
+<p class="subtitle">How should test results be grouped and structured?</p>
+
+<div class="cards">
+
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="font-family:monospace;font-size:12px;background:#1a1530;color:#ccc;padding:12px;border-radius:4px;line-height:1.7">
+        <div style="color:#aaa;margin-bottom:6px;font-size:11px">auth.yaml &nbsp;<span style="color:#e87070">1 failed</span> &nbsp;<span style="color:#6ec97e">2 passed</span></div>
+        <div style="padding-left:12px">
+          <div style="color:#6ec97e">✓ login-test</div>
+          <div style="color:#e87070">✗ token-refresh
+            <span style="color:#888;font-size:11px;margin-left:8px">12ms</span>
+          </div>
+          <div style="padding-left:14px;color:#aaa;font-size:11px;margin:2px 0">✗ status 401 — expected 200</div>
+          <div style="padding-left:14px;color:#aaa;font-size:11px;margin:2px 0">✓ response has token field</div>
+          <div style="padding-left:14px;margin-top:4px">
+            <span style="color:#7b8cf8;font-size:11px;cursor:pointer">↗ go to test</span>
+          </div>
+          <div style="color:#6ec97e">✓ logout-test</div>
+        </div>
+        <div style="color:#aaa;margin-top:8px;font-size:11px">users.yaml &nbsp;<span style="color:#6ec97e">1 passed</span></div>
+        <div style="padding-left:12px">
+          <div style="color:#6ec97e">✓ get-user-profile</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A — File-grouped</h3>
+      <p>Tests nest under their source file. Files show a pass/fail count. Matches how tests are organized on disk.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="font-family:monospace;font-size:12px;background:#1a1530;color:#ccc;padding:12px;border-radius:4px;line-height:1.7">
+        <div style="color:#e87070;margin-bottom:4px">✗ Failed (1)</div>
+        <div style="padding-left:12px">
+          <div style="color:#e87070">✗ token-refresh
+            <span style="color:#888;font-size:10px;margin-left:6px">auth.yaml</span>
+          </div>
+          <div style="padding-left:14px;color:#aaa;font-size:11px">✗ status 401 — expected 200</div>
+          <div style="padding-left:14px;color:#aaa;font-size:11px">✓ response has token field</div>
+          <div style="padding-left:14px;margin-top:3px">
+            <span style="color:#7b8cf8;font-size:11px">↗ go to test</span>
+          </div>
+        </div>
+        <div style="color:#6ec97e;margin-top:8px;margin-bottom:4px">✓ Passed (3)</div>
+        <div style="padding-left:12px;color:#888">
+          <div>login-test <span style="font-size:10px">auth.yaml</span></div>
+          <div>logout-test <span style="font-size:10px">auth.yaml</span></div>
+          <div>get-user-profile <span style="font-size:10px">users.yaml</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B — Pass/fail split</h3>
+      <p>Failed tests surface at the top, passed tests collapsed below. Prioritizes failures — fastest path to what's broken.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="font-family:monospace;font-size:12px;background:#1a1530;color:#ccc;padding:12px;border-radius:4px;line-height:1.7">
+        <div style="color:#aaa;font-size:11px;margin-bottom:6px">auth.yaml</div>
+        <div style="padding-left:12px">
+          <div style="color:#e87070;margin-bottom:2px">✗ token-refresh</div>
+          <div style="padding-left:14px;color:#aaa;font-size:11px">✗ status 401 — expected 200</div>
+          <div style="padding-left:14px;color:#aaa;font-size:11px">✓ response has token field</div>
+          <div style="padding-left:14px;margin-top:3px;display:flex;gap:10px">
+            <span style="color:#7b8cf8;font-size:11px">↗ go to test</span>
+            <span style="color:#888;font-size:11px">↺ re-run</span>
+          </div>
+          <div style="color:#6ec97e;margin-top:6px">✓ login-test</div>
+          <div style="color:#6ec97e">✓ logout-test</div>
+        </div>
+        <div style="color:#aaa;font-size:11px;margin-top:8px;margin-bottom:6px">users.yaml</div>
+        <div style="padding-left:12px">
+          <div style="color:#6ec97e">✓ get-user-profile</div>
+        </div>
+        <div style="margin-top:8px;font-size:11px;color:#888;border-top:1px solid #333;padding-top:6px">3/4 passed · 48ms</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C — File-grouped + re-run</h3>
+      <p>Like A but with a re-run button on each test. Pairs with the navigate action for a quick fix→re-run loop.</p>
+    </div>
+  </div>
+
+</div>

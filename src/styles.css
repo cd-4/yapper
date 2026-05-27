@@ -791,9 +791,17 @@ small {
 .workspace {
   display: flex;
   flex-direction: column;
-  gap: 10px;
   height: 100%;
   min-width: 0;
+  overflow: hidden;
+}
+
+.workspace-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 10px;
+  min-height: 0;
   overflow: auto;
   padding: 12px;
 }

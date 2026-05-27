@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Test Results UI</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #f0ebf8;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 32px 24px;
+    min-height: 100vh;
+    gap: 24px;
+  }
+
+  .page-label {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #8b7aaa;
+  }
+
+  /* ── Container (replaces the .console section) ── */
+  .results-panel {
+    width: 100%;
+    max-width: 680px;
+    background: #ffffff;
+    border: 1px solid #ddd6f0;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .results-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid #ede8f7;
+    background: #faf8fd;
+  }
+
+  .results-header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #3d2f6e;
+  }
+
+  .results-command {
+    font-size: 11px;
+    color: #8b7aaa;
+    font-family: monospace;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 99px;
+  }
+  .badge-pass { background: #d9eee7; color: #217a63; }
+  .badge-fail { background: #f6d7df; color: #c2415d; }
+  .badge-neutral { background: #ede8f7; color: #5c4a8a; }
+
+  /* ── Section (Failed / Passed) ── */
+  .results-section { border-bottom: 1px solid #ede8f7; }
+  .results-section:last-child { border-bottom: none; }
+
+  .section-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    cursor: pointer;
+    user-select: none;
+    background: #faf8fd;
+    border-bottom: 1px solid #ede8f7;
+  }
+  .section-toggle:hover { background: #f3eeff; }
+
+  .section-toggle .chevron {
+    font-size: 10px;
+    color: #8b7aaa;
+    transition: transform 0.15s;
+    display: inline-block;
+  }
+  .section-toggle.collapsed .chevron { transform: rotate(-90deg); }
+
+  .section-title {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+  .section-title.fail { color: #c2415d; }
+  .section-title.pass { color: #217a63; }
+
+  .section-count {
+    font-size: 11px;
+    color: #8b7aaa;
+    margin-left: auto;
+  }
+
+  /* ── Test row ── */
+  .test-row {
+    border-bottom: 1px solid #f3eeff;
+  }
+  .test-row:last-child { border-bottom: none; }
+
+  .test-row-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 14px 7px 28px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .test-row-header:hover { background: #faf8fd; }
+
+  .status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .dot-pass { background: #217a63; }
+  .dot-fail { background: #c2415d; }
+
+  .test-name {
+    font-size: 13px;
+    color: #2e2252;
+    flex: 1;
+  }
+
+  .test-meta {
+    font-size: 11px;
+    color: #a098c0;
+    font-family: monospace;
+  }
+
+  .test-chevron {
+    font-size: 10px;
+    color: #b0a4d0;
+    transition: transform 0.15s;
+  }
+  .test-row.expanded .test-chevron { transform: rotate(90deg); }
+
+  /* ── Assertion detail (expanded) ── */
+  .test-detail {
+    padding: 8px 14px 10px 44px;
+    background: #f8f5ff;
+    border-top: 1px solid #ede8f7;
+    display: none;
+  }
+  .test-row.expanded .test-detail { display: block; }
+
+  .assertion-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 10px;
+  }
+
+  .assertion {
+    display: flex;
+    align-items: flex-start;
+    gap: 7px;
+    font-size: 12px;
+  }
+
+  .assertion-icon { flex-shrink: 0; margin-top: 1px; }
+  .assertion-icon.pass { color: #217a63; }
+  .assertion-icon.fail { color: #c2415d; }
+
+  .assertion-body { display: flex; flex-direction: column; gap: 1px; }
+  .assertion-name { color: #3d2f6e; font-weight: 500; }
+  .assertion-msg { color: #c2415d; font-family: monospace; font-size: 11px; }
+
+  .test-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .action-link {
+    font-size: 11px;
+    color: #7b6cb5;
+    border: 1px solid #ddd6f0;
+    border-radius: 4px;
+    padding: 3px 8px;
+    cursor: pointer;
+    background: white;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    text-decoration: none;
+  }
+  .action-link:hover { background: #f0ebf8; border-color: #b09ed8; color: #4a3488; }
+
+  /* ── Footer ── */
+  .results-footer {
+    padding: 7px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #faf8fd;
+    border-top: 1px solid #ede8f7;
+    font-size: 11px;
+    color: #8b7aaa;
+  }
+</style>
+</head>
+<body>
+
+<div class="page-label">Results panel (replaces the console)</div>
+
+<div class="results-panel">
+
+  <!-- Header -->
+  <div class="results-header">
+    <div class="results-header-left">
+      Run Output
+      <span class="results-command">yapitest tests/</span>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center">
+      <span class="badge badge-fail">✗ 1 failed</span>
+      <span class="badge badge-pass">✓ 3 passed</span>
+    </div>
+  </div>
+
+  <!-- Failed section (expanded by default) -->
+  <div class="results-section">
+    <div class="section-toggle" onclick="toggleSection(this)">
+      <span class="chevron">▶</span>
+      <span class="section-title fail">✗ Failed</span>
+      <span class="section-count">1 test</span>
+    </div>
+
+    <div class="section-body">
+      <!-- Failing test — starts expanded -->
+      <div class="test-row expanded">
+        <div class="test-row-header" onclick="toggleTest(this.parentElement)">
+          <div class="status-dot dot-fail"></div>
+          <span class="test-name">token-refresh</span>
+          <span class="test-meta">auth.yaml · 12ms</span>
+          <span class="test-chevron">▶</span>
+        </div>
+        <div class="test-detail">
+          <div class="assertion-list">
+            <div class="assertion">
+              <span class="assertion-icon fail">✗</span>
+              <div class="assertion-body">
+                <span class="assertion-name">status code</span>
+                <span class="assertion-msg">expected 200, got 401</span>
+              </div>
+            </div>
+            <div class="assertion">
+              <span class="assertion-icon pass">✓</span>
+              <div class="assertion-body">
+                <span class="assertion-name">response has token field</span>
+              </div>
+            </div>
+          </div>
+          <div class="test-actions">
+            <a class="action-link" href="#">↗ Go to test</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Passed section (collapsed by default) -->
+  <div class="results-section">
+    <div class="section-toggle collapsed" onclick="toggleSection(this)">
+      <span class="chevron">▶</span>
+      <span class="section-title pass">✓ Passed</span>
+      <span class="section-count">3 tests</span>
+    </div>
+
+    <div class="section-body" style="display:none">
+      <div class="test-row">
+        <div class="test-row-header" onclick="toggleTest(this.parentElement)">
+          <div class="status-dot dot-pass"></div>
+          <span class="test-name">login-test</span>
+          <span class="test-meta">auth.yaml · 34ms</span>
+          <span class="test-chevron">▶</span>
+        </div>
+        <div class="test-detail">
+          <div class="assertion-list">
+            <div class="assertion">
+              <span class="assertion-icon pass">✓</span>
+              <div class="assertion-body"><span class="assertion-name">status code 200</span></div>
+            </div>
+            <div class="assertion">
+              <span class="assertion-icon pass">✓</span>
+              <div class="assertion-body"><span class="assertion-name">response has session token</span></div>
+            </div>
+          </div>
+          <div class="test-actions">
+            <a class="action-link" href="#">↗ Go to test</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="test-row">
+        <div class="test-row-header" onclick="toggleTest(this.parentElement)">
+          <div class="status-dot dot-pass"></div>
+          <span class="test-name">logout-test</span>
+          <span class="test-meta">auth.yaml · 9ms</span>
+          <span class="test-chevron">▶</span>
+        </div>
+        <div class="test-detail">
+          <div class="assertion-list">
+            <div class="assertion">
+              <span class="assertion-icon pass">✓</span>
+              <div class="assertion-body"><span class="assertion-name">status code 204</span></div>
+            </div>
+          </div>
+          <div class="test-actions">
+            <a class="action-link" href="#">↗ Go to test</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="test-row">
+        <div class="test-row-header" onclick="toggleTest(this.parentElement)">
+          <div class="status-dot dot-pass"></div>
+          <span class="test-name">get-user-profile</span>
+          <span class="test-meta">users.yaml · 21ms</span>
+          <span class="test-chevron">▶</span>
+        </div>
+        <div class="test-detail">
+          <div class="assertion-list">
+            <div class="assertion">
+              <span class="assertion-icon pass">✓</span>
+              <div class="assertion-body"><span class="assertion-name">status code 200</span></div>
+            </div>
+            <div class="assertion">
+              <span class="assertion-icon pass">✓</span>
+              <div class="assertion-body"><span class="assertion-name">body contains user object</span></div>
+            </div>
+          </div>
+          <div class="test-actions">
+            <a class="action-link" href="#">↗ Go to test</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="results-footer">
+    <span>4 tests · 76ms total</span>
+    <span style="color:#c2415d;font-weight:500">exit 1</span>
+  </div>
+
+</div>
+
+<script>
+function toggleSection(header) {
+  const section = header.parentElement;
+  const body = section.querySelector('.section-body');
+  const isCollapsed = header.classList.contains('collapsed');
+  if (isCollapsed) {
+    header.classList.remove('collapsed');
+    body.style.display = '';
+  } else {
+    header.classList.add('collapsed');
+    body.style.display = 'none';
+  }
+}
+
+function toggleTest(row) {
+  row.classList.toggle('expanded');
+}
+</script>
+
+</body>
+</html>

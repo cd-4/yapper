@@ -41,11 +41,28 @@ struct DirectoryEntry {
 }
 
 #[derive(Serialize)]
+struct AssertionData {
+    name: String,
+    passed: bool,
+    message: Option<String>,
+}
+
+#[derive(Serialize)]
+struct TestResultData {
+    name: String,
+    passed: bool,
+    file_path: Option<String>,
+    duration_ms: u64,
+    failure_message: Option<String>,
+    assertions: Vec<AssertionData>,
+}
+
+#[derive(Serialize)]
 struct RunResult {
     command: String,
     status: Option<i32>,
-    stdout: String,
-    stderr: String,
+    elapsed_ms: u64,
+    tests: Vec<TestResultData>,
 }
 
 #[derive(Serialize)]
@@ -634,30 +651,34 @@ fn run_yapitest(
 
     let all_passed = results.iter().all(|r| r.passed());
 
+    let tests = results
+        .iter()
+        .map(|r| TestResultData {
+            name: r.name().to_string(),
+            passed: r.passed(),
+            file_path: r
+                .file_path()
+                .and_then(|p| p.strip_prefix(&root).ok())
+                .map(|p| p.to_string_lossy().into_owned()),
+            duration_ms: r.duration_ms,
+            failure_message: r.get_failure_message().map(str::to_string),
+            assertions: r
+                .assertions()
+                .map(|a| AssertionData {
+                    name: a.name.clone(),
+                    passed: a.passed,
+                    message: a.message.clone(),
+                })
+                .collect(),
+        })
+        .collect();
+
     Ok(RunResult {
         command: display,
         status: Some(if all_passed { 0 } else { 1 }),
-        stdout: format_run_output(&results, elapsed_ms),
-        stderr: String::new(),
+        elapsed_ms,
+        tests,
     })
-}
-
-fn format_run_output(results: &[yapitest::TestResult], elapsed_ms: u64) -> String {
-    let mut out = String::new();
-    for r in results {
-        if r.passed() {
-            out.push_str(&format!("PASS {}\n", r.name()));
-        } else {
-            out.push_str(&format!("FAIL {}\n", r.name()));
-            if let Some(msg) = r.get_failure_message() {
-                out.push_str(&format!("     {msg}\n"));
-            }
-        }
-    }
-    let passed = results.iter().filter(|r| r.passed()).count();
-    let total = results.len();
-    out.push_str(&format!("\n{passed}/{total} passed ({elapsed_ms} ms)\n"));
-    out
 }
 
 #[tauri::command]
