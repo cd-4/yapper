@@ -77,6 +77,7 @@
   let sidebarCollapsed = false;
   let isMac = navigator.platform.toLowerCase().includes("mac");
   let collapsedTreeOpen = false;
+  let workspaceContent: HTMLDivElement;
   let runMenu = { open: false, left: 0, top: 0 };
   let editingTest: { file: FileEntry; originalName: string } | null = null;
   let treeMenu:
@@ -982,7 +983,11 @@
 
   function handleNavigate(e: CustomEvent<{ filePath: string; testName: string }>) {
     const file = files.find((f) => f.relative_path === e.detail.filePath);
-    if (file) selectTest(file, e.detail.testName);
+    if (file) {
+      void selectTest(file, e.detail.testName).then(() => {
+        workspaceContent?.scrollTo({ top: 0, behavior: "smooth" });
+      });
+    }
   }
 
   async function runDraft() {
@@ -1745,7 +1750,7 @@
   </aside>
 
   <section class="workspace">
-    <div class="workspace-content">
+    <div class="workspace-content" bind:this={workspaceContent}>
     <header class="topbar">
       <div>
         <h2>{selected ? selected.relative_path : "Request Builder"}</h2>
