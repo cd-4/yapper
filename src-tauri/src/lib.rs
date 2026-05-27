@@ -615,7 +615,7 @@ step-sets:
 }
 
 #[tauri::command]
-fn run_yapitest(
+async fn run_yapitest(
     root: String,
     target: Option<String>,
     test_name: Option<String>,
@@ -641,8 +641,12 @@ fn run_yapitest(
     }
 
     let start = std::time::Instant::now();
-    let mut results = yapitest::run_path_blocking(&path)
-        .map_err(|e| AppError::Message(e.to_string()))?;
+    let mut results = tauri::async_runtime::spawn_blocking(move || {
+        yapitest::run_path_blocking(&path)
+    })
+    .await
+    .map_err(|e| AppError::Message(e.to_string()))?
+    .map_err(|e| AppError::Message(e.to_string()))?;
     let elapsed_ms = start.elapsed().as_millis() as u64;
 
     if let Some(ref filter) = name_filter {
