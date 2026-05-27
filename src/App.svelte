@@ -420,12 +420,53 @@
     void runYapitest(path);
   }
 
-  function runFile(file: FileEntry) {
-    void runYapitest(file.relative_path);
+  async function runFile(file: FileEntry) {
+    const dirtyTests: Record<string, TestDraft> = {};
+    for (const name of file.tests) {
+      const key = `${file.relative_path}#${name}`;
+      if (key === selectedTestKey && dirty && editingTest) {
+        dirtyTests[name] = draft;
+      } else if (key in dirtyDrafts) {
+        dirtyTests[name] = dirtyDrafts[key].draft;
+      }
+    }
+    if (Object.keys(dirtyTests).length === 0) {
+      void runYapitest(file.relative_path);
+      return;
+    }
+    let contents = await call<string>("read_yaml_file", { root: rootPath.trim(), relativePath: file.relative_path });
+    for (const [name, testDraft] of Object.entries(dirtyTests)) {
+      contents = replaceTestDraft(contents, name, testDraft) ?? contents;
+    }
+    testRunning = true;
+    runResult = null;
+    runResult = await call<RunResult>("run_yapitest_content", {
+      root: rootPath.trim(),
+      content: contents,
+      testName: null,
+      relativePath: file.relative_path,
+    });
+    testRunning = false;
   }
 
-  function runTreeTest(file: FileEntry, testName: string) {
-    void runYapitest(file.relative_path, testName);
+  async function runTreeTest(file: FileEntry, testName: string) {
+    const key = `${file.relative_path}#${testName}`;
+    const isCurrentDirty = key === selectedTestKey && dirty && editingTest;
+    const savedDirty = !isCurrentDirty && key in dirtyDrafts ? dirtyDrafts[key] : null;
+    if (!isCurrentDirty && !savedDirty) {
+      void runYapitest(file.relative_path, testName);
+      return;
+    }
+    const testDraft = isCurrentDirty ? draft : savedDirty!.draft;
+    testRunning = true;
+    runResult = null;
+    runResult = await call<RunResult>("run_yapitest_content", {
+      root: rootPath.trim(),
+      content: buildTestYaml(testDraft),
+      testName: testDraft.testName.trim() || testName,
+      relativePath: file.relative_path,
+    });
+    testRunning = false;
   }
 
   function runProject(path: string) {
@@ -1709,7 +1750,7 @@
                       {#if row.file.kind === "test"}
                         <button
                           class="tree-run-button"
-                          on:click|stopPropagation={() => runFile(row.file)}
+                          on:click|stopPropagation={() => void runFile(row.file)}
                           disabled={busy || !rootPath}
                           aria-label={`Run ${row.file.name}`}
                           title={`Run ${row.file.name}`}
@@ -1735,7 +1776,7 @@
                       </button>
                       <button
                         class="tree-run-button"
-                        on:click|stopPropagation={() => runTreeTest(row.file, row.name)}
+                        on:click|stopPropagation={() => void runTreeTest(row.file, row.name)}
                         disabled={busy || !rootPath}
                         aria-label={`Run ${row.name}`}
                         title={`Run ${row.name}`}
