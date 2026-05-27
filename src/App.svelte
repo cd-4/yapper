@@ -1426,7 +1426,6 @@
     {:else}
       <div class="sidebar-head">
         <div class="brand">
-          <img src="/YapperLogoAlpha.png" alt="Yapper" class="sidebar-logo" />
           <div>
             <h1>Yapper</h1>
           </div>
