@@ -1584,7 +1584,7 @@
                           on:dblclick|stopPropagation={() => startTreeRename(row.key)}
                         >
                           <span>{row.name}</span>
-                          {#if dirtyFilePath?.startsWith(row.key + '/')}<span class="dirty-dot"></span>{/if}
+                          {#if dirtyFilePath?.startsWith(row.key + '/') && !row.expanded}<span class="dirty-dot"></span>{/if}
                         </button>
                       {/if}
                       <button
@@ -1649,7 +1649,7 @@
                           on:dblclick|stopPropagation={() => startTreeRename(row.file.relative_path)}
                         >
                           <span>{row.file.name}</span>
-                          {#if dirtyFilePath === row.file.relative_path}<span class="dirty-dot"></span>{/if}
+                          {#if dirtyFilePath === row.file.relative_path && !row.expanded}<span class="dirty-dot"></span>{/if}
                         </button>
                       {/if}
                       {#if row.file.kind === "test"}
