@@ -56,6 +56,7 @@
   };
 
   let rootPath = "";
+  let dirtyDrafts: Record<string, { draft: TestDraft; original: string }> = {};
   let projects: ProjectEntry[] = [];
   let directories: DirectoryEntry[] = [];
   let files: FileEntry[] = [];
@@ -142,7 +143,11 @@
   );
   $: treeRows = buildTreeRows(filteredFiles, filteredDirectories, expandedTree);
   $: dirty = editingTest ? generatedYaml !== original : editor !== original;
-  $: dirtyFilePath = dirty && editingTest ? editingTest.file.relative_path : null;
+  $: allDirtyTestKeys = new Set([
+    ...Object.keys(dirtyDrafts),
+    ...(dirty && editingTest ? [selectedTestKey] : []),
+  ]);
+  $: allDirtyFilePaths = new Set([...allDirtyTestKeys].map(k => k.split('#')[0]));
   $: generatedYaml = buildTestYaml(draft);
   $: generatedConfigYaml = buildConfigYaml(configDraft);
   $: suggestions = view === "config" ? buildConfigSuggestions(configDraft, catalog) : buildSuggestions(draft, catalog);
@@ -253,6 +258,7 @@
 
   async function loadProject(path: string, savedState: UiState | null = null) {
     rootPath = path;
+    dirtyDrafts = {};
     treeMenu = { type: "none", left: 0, top: 0 };
     selected = null;
     selectedRelativePath = "";
@@ -664,6 +670,9 @@
       original = "";
     }
 
+    dirtyDrafts = Object.fromEntries(
+      Object.entries(dirtyDrafts).filter(([k]) => !k.startsWith(path + '#') && !k.startsWith(path + '/'))
+    );
     await refreshRepositoryTree();
     if (!selected && files.length > 0) await selectFile(files[0]);
     else if (!selected) saveUiState({ relativePath: null, testName: null });
@@ -699,6 +708,11 @@
       editor = "";
       original = "";
     }
+    const deletedKey = `${file.relative_path}#${testName}`;
+    if (deletedKey in dirtyDrafts) {
+      const { [deletedKey]: _, ...remaining } = dirtyDrafts;
+      dirtyDrafts = remaining;
+    }
 
     await refreshRepositoryTree();
     const updatedFile = files.find((item) => item.relative_path === file.relative_path);
@@ -729,10 +743,33 @@
   }
 
   async function selectTest(file: FileEntry, testName: string) {
+    const newKey = `${file.relative_path}#${testName}`;
+
+    // Save dirty state before navigating away
+    if (editingTest && dirty && selectedTestKey !== newKey) {
+      dirtyDrafts = {
+        ...dirtyDrafts,
+        [selectedTestKey]: { draft: JSON.parse(JSON.stringify(draft)) as TestDraft, original },
+      };
+    }
+
     selectFromCollapsedTree();
     selected = file;
     selectedRelativePath = file.relative_path;
-    selectedTestKey = `${file.relative_path}#${testName}`;
+    selectedTestKey = newKey;
+
+    // Restore a previously saved dirty draft if one exists
+    const saved = dirtyDrafts[newKey];
+    if (saved) {
+      draft = saved.draft;
+      editingTest = { file, originalName: testName };
+      editor = buildTestYaml(draft);
+      original = saved.original;
+      view = "builder";
+      saveUiState({ rootPath, relativePath: file.relative_path, testName });
+      return;
+    }
+
     const contents = await call<string>("read_yaml_file", {
       root: rootPath.trim(),
       relativePath: file.relative_path,
@@ -751,11 +788,7 @@
     editor = buildTestYaml(parsed);
     original = editor;
     view = "builder";
-    saveUiState({
-      rootPath,
-      relativePath: file.relative_path,
-      testName,
-    });
+    saveUiState({ rootPath, relativePath: file.relative_path, testName });
   }
 
   async function refreshCatalog() {
@@ -818,6 +851,7 @@
 
   async function saveDraft() {
     if (editingTest) {
+      const keyBeforeSave = selectedTestKey;
       const contents = await call<string>("read_yaml_file", {
         root: rootPath.trim(),
         relativePath: editingTest.file.relative_path,
@@ -844,6 +878,10 @@
       editor = buildTestYaml(draft);
       original = editor;
       view = "builder";
+      if (keyBeforeSave in dirtyDrafts) {
+        const { [keyBeforeSave]: _, ...remaining } = dirtyDrafts;
+        dirtyDrafts = remaining;
+      }
       saveUiState({
         rootPath,
         relativePath: activeFilePath,
@@ -1600,7 +1638,7 @@
                           on:dblclick|stopPropagation={() => startTreeRename(row.key)}
                         >
                           <span>{row.name}</span>
-                          {#if dirtyFilePath?.startsWith(row.key + '/') && !row.expanded}<span class="dirty-dot"></span>{/if}
+                          {#if !row.expanded && [...allDirtyFilePaths].some(p => p.startsWith(row.key + '/'))}<span class="dirty-dot"></span>{/if}
                         </button>
                       {/if}
                       <button
@@ -1665,7 +1703,7 @@
                           on:dblclick|stopPropagation={() => startTreeRename(row.file.relative_path)}
                         >
                           <span>{row.file.name}</span>
-                          {#if dirtyFilePath === row.file.relative_path && !row.expanded}<span class="dirty-dot"></span>{/if}
+                          {#if allDirtyFilePaths.has(row.file.relative_path) && !row.expanded}<span class="dirty-dot"></span>{/if}
                         </button>
                       {/if}
                       {#if row.file.kind === "test"}
@@ -1693,7 +1731,7 @@
                       <span class="tree-test-dot"></span>
                       <button class="tree-label" on:click={() => selectTest(row.file, row.name)}>
                         <span>{row.name}</span>
-                        {#if dirty && selectedTestKey === row.key}<span class="dirty-dot"></span>{/if}
+                        {#if allDirtyTestKeys.has(row.key)}<span class="dirty-dot"></span>{/if}
                       </button>
                       <button
                         class="tree-run-button"
