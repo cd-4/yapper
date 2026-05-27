@@ -604,35 +604,60 @@ fn run_yapitest(
     test_name: Option<String>,
 ) -> AppResult<RunResult> {
     let root = normalize_root(&root)?;
-    let mut command = Command::new("yapitest");
-    command.current_dir(&root);
+
+    let target = target.filter(|v| !v.trim().is_empty());
+    let name_filter = test_name.filter(|v| !v.trim().is_empty());
 
     let mut display = String::from("yapitest");
-    if let Some(target) = target.filter(|value| !value.trim().is_empty()) {
-        let path = safe_join(&root, &target)?;
-        command.arg(path);
-        display.push(' ');
-        display.push_str(&target);
-    }
+    let path = match &target {
+        Some(t) => {
+            display.push(' ');
+            display.push_str(t);
+            safe_join(&root, t)?
+        }
+        None => root.clone(),
+    };
 
-    if let Some(test_name) = test_name.filter(|value| !value.trim().is_empty()) {
-        command.args(["-k", &test_name]);
+    if let Some(ref name) = name_filter {
         display.push_str(" -k ");
-        display.push_str(&test_name);
+        display.push_str(name);
     }
 
-    let output = command.output().map_err(|error| {
-        AppError::Message(format!(
-            "Could not run yapitest. Install it with `pip install yapitest`. Details: {error}"
-        ))
-    })?;
+    let start = std::time::Instant::now();
+    let mut results = yapitest::run_path_blocking(&path)
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    let elapsed_ms = start.elapsed().as_millis() as u64;
+
+    if let Some(ref filter) = name_filter {
+        results.retain(|r: &yapitest::TestResult| r.name().contains(filter.as_str()));
+    }
+
+    let all_passed = results.iter().all(|r| r.passed());
 
     Ok(RunResult {
         command: display,
-        status: output.status.code(),
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        status: Some(if all_passed { 0 } else { 1 }),
+        stdout: format_run_output(&results, elapsed_ms),
+        stderr: String::new(),
     })
+}
+
+fn format_run_output(results: &[yapitest::TestResult], elapsed_ms: u64) -> String {
+    let mut out = String::new();
+    for r in results {
+        if r.passed() {
+            out.push_str(&format!("PASS {}\n", r.name()));
+        } else {
+            out.push_str(&format!("FAIL {}\n", r.name()));
+            if let Some(msg) = r.get_failure_message() {
+                out.push_str(&format!("     {msg}\n"));
+            }
+        }
+    }
+    let passed = results.iter().filter(|r| r.passed()).count();
+    let total = results.len();
+    out.push_str(&format!("\n{passed}/{total} passed ({elapsed_ms} ms)\n"));
+    out
 }
 
 #[tauri::command]
