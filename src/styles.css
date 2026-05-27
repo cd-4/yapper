@@ -299,21 +299,11 @@ textarea {
   padding: 0 10px;
 }
 
-.titlebar-mark {
-  align-items: center;
-  background: var(--accent);
-  border-radius: 3px;
-  color: #241747;
-  display: inline-flex;
-  font-size: 12px;
-  font-weight: 800;
-  height: 22px;
-  justify-content: center;
-  width: 22px;
-}
-
-.titlebar-brand span:last-child {
-  font-weight: 700;
+.titlebar-logo {
+  height: 26px;
+  width: auto;
+  object-fit: contain;
+  display: block;
 }
 
 .titlebar-context {
@@ -499,17 +489,12 @@ textarea {
   gap: 8px;
 }
 
-.rail-mark {
-  align-items: center;
-  background: var(--accent);
-  border-radius: 3px;
-  color: #241747;
-  display: inline-flex;
+.rail-logo {
+  height: 28px;
+  width: auto;
+  object-fit: contain;
+  display: block;
   flex: none;
-  font-weight: 800;
-  height: 32px;
-  justify-content: center;
-  width: 32px;
 }
 
 .rail-button {
@@ -565,16 +550,11 @@ textarea {
   min-width: 0;
 }
 
-.mark {
-  align-items: center;
-  background: var(--accent);
-  border-radius: 3px;
-  color: #241747;
-  display: inline-flex;
-  font-weight: 800;
-  height: 32px;
-  justify-content: center;
-  width: 32px;
+.sidebar-logo {
+  height: 28px;
+  width: auto;
+  object-fit: contain;
+  display: block;
 }
 
 h1,

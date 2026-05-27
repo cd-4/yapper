@@ -1356,8 +1356,7 @@
       aria-label="Move window"
     >
       <span class="titlebar-brand">
-        <span class="titlebar-mark">B</span>
-        <span>Yapper</span>
+        <img src="/YapperLogoAlpha.png" alt="Yapper" class="titlebar-logo" />
       </span>
       <span class="titlebar-context">
         {#if rootPath}
@@ -1386,7 +1385,7 @@
   <aside class="sidebar" aria-label="Repository browser">
     {#if sidebarCollapsed}
       <div class="collapsed-rail">
-        <span class="rail-mark" aria-hidden="true">B</span>
+        <img src="/YapperLogoAlpha.png" alt="" class="rail-logo" aria-hidden="true" />
         <button
           class="icon-button rail-button"
           on:click={() => setSidebarCollapsed(false)}
@@ -1427,7 +1426,7 @@
     {:else}
       <div class="sidebar-head">
         <div class="brand">
-          <span class="mark">B</span>
+          <img src="/YapperLogoAlpha.png" alt="Yapper" class="sidebar-logo" />
           <div>
             <h1>Yapper</h1>
           </div>
