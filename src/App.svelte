@@ -17,6 +17,7 @@
     Play,
     Plus,
     Save,
+    SaveAll,
     Trash2,
     X,
   } from "lucide-svelte";
