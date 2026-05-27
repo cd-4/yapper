@@ -641,6 +641,7 @@ small {
   background: transparent;
   border-color: transparent;
   flex: 1;
+  gap: 6px;
   justify-content: flex-start;
   min-width: 0;
   min-height: 30px;
