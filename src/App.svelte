@@ -141,7 +141,7 @@
       !filter.trim() || directory.relative_path.toLowerCase().includes(filter.toLowerCase()),
   );
   $: treeRows = buildTreeRows(filteredFiles, filteredDirectories, expandedTree);
-  $: dirty = editor !== original;
+  $: dirty = editingTest ? generatedYaml !== original : editor !== original;
   $: dirtyFilePath = dirty && editingTest ? editingTest.file.relative_path : null;
   $: generatedYaml = buildTestYaml(draft);
   $: generatedConfigYaml = buildConfigYaml(configDraft);
@@ -858,6 +858,14 @@
   }
 
   function showBuilder() {
+    if (editingTest) {
+      if (view === "yaml") {
+        const parsed = parseTestDraft(editor, draft.testName) ?? parseTestDraft(editor, editingTest.originalName);
+        if (parsed) draft = parsed;
+      }
+      view = "builder";
+      return;
+    }
     const activeFile = selected || files.find((file) => file.relative_path === currentUiState().relativePath);
     if (activeFile?.kind === "config") {
       selected = activeFile;
@@ -875,9 +883,17 @@
     view = "builder";
   }
 
+  async function saveYamlDraft() {
+    if (!editingTest) return;
+    const parsed = parseTestDraft(editor, draft.testName) ?? parseTestDraft(editor, editingTest.originalName);
+    if (parsed) draft = parsed;
+    await saveDraft();
+  }
+
   async function showYaml() {
     if (editingTest) {
-      await selectFile(editingTest.file);
+      editor = generatedYaml;
+      view = "yaml";
       return;
     }
     view = "yaml";
@@ -1772,7 +1788,6 @@
         {#if view === "config"}
           <button on:click={save} disabled={!selected || busy}>Save Config</button>
         {/if}
-        <button on:click={runDraft} disabled={busy || !rootPath}>Run Draft</button>
         <div class="tabs">
           <button class:active={view === "builder" || view === "config"} on:click={showBuilder}>Builder</button>
           <button class:active={view === "yaml"} on:click={showYaml}>YAML</button>
@@ -2070,12 +2085,16 @@
     {:else}
       <section class="editor-pane">
         <div class="editor-actions">
-          <button on:click={selected ? save : saveDraft} disabled={busy || (!selected && !rootPath) || (selected && !dirty)}>
-            Save
-          </button>
-          <button on:click={() => selected && runYapitest(selected.relative_path)} disabled={!selected || busy}>
-            Run File
-          </button>
+          {#if editingTest}
+            <button on:click={saveYamlDraft} disabled={busy || !dirty}>Save</button>
+          {:else}
+            <button on:click={selected ? save : saveDraft} disabled={busy || (!selected && !rootPath) || (selected && !dirty)}>
+              Save
+            </button>
+            <button on:click={() => selected && runYapitest(selected.relative_path)} disabled={!selected || busy}>
+              Run File
+            </button>
+          {/if}
         </div>
         <textarea class="editor" bind:value={editor} spellcheck="false"></textarea>
       </section>
