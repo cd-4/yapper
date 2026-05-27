@@ -991,9 +991,19 @@
   }
 
   async function runDraft() {
-    const relativePath = await saveDraft();
-    if (!relativePath) return;
-    await runYapitest(relativePath, draft.testName.trim() || "new-api-test");
+    if (!rootPath) {
+      message = "Open a project before running it.";
+      return;
+    }
+    testRunning = true;
+    runResult = null;
+    runResult = await call<RunResult>("run_yapitest_content", {
+      root: rootPath.trim(),
+      content: view === "builder" ? generatedYaml : editor,
+      testName: view === "builder" ? (draft.testName.trim() || null) : null,
+      relativePath: editingTest?.file.relative_path ?? null,
+    });
+    testRunning = false;
   }
 
   async function runCurrentTest() {
