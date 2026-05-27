@@ -794,6 +794,28 @@ small {
   gap: 10px;
 }
 
+.topbar-title {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.topbar-title h2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dirty-dot {
+  background: #f97316;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+  height: 7px;
+  width: 7px;
+}
+
 .top-actions {
   align-items: center;
   display: flex;

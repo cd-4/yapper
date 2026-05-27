@@ -142,6 +142,7 @@
   );
   $: treeRows = buildTreeRows(filteredFiles, filteredDirectories, expandedTree);
   $: dirty = editor !== original;
+  $: dirtyFilePath = dirty && editingTest ? editingTest.file.relative_path : null;
   $: generatedYaml = buildTestYaml(draft);
   $: generatedConfigYaml = buildConfigYaml(configDraft);
   $: suggestions = view === "config" ? buildConfigSuggestions(configDraft, catalog) : buildSuggestions(draft, catalog);
@@ -1583,6 +1584,7 @@
                           on:dblclick|stopPropagation={() => startTreeRename(row.key)}
                         >
                           <span>{row.name}</span>
+                          {#if dirtyFilePath?.startsWith(row.key + '/')}<span class="dirty-dot"></span>{/if}
                         </button>
                       {/if}
                       <button
@@ -1647,6 +1649,7 @@
                           on:dblclick|stopPropagation={() => startTreeRename(row.file.relative_path)}
                         >
                           <span>{row.file.name}</span>
+                          {#if dirtyFilePath === row.file.relative_path}<span class="dirty-dot"></span>{/if}
                         </button>
                       {/if}
                       {#if row.file.kind === "test"}
@@ -1674,6 +1677,7 @@
                       <span class="tree-test-dot"></span>
                       <button class="tree-label" on:click={() => selectTest(row.file, row.name)}>
                         <span>{row.name}</span>
+                        {#if dirty && selectedTestKey === row.key}<span class="dirty-dot"></span>{/if}
                       </button>
                       <button
                         class="tree-run-button"
@@ -1760,8 +1764,9 @@
   <section class="workspace">
     <div class="workspace-content" bind:this={workspaceContent}>
     <header class="topbar">
-      <div>
+      <div class="topbar-title">
         <h2>{selected ? selected.relative_path : "Request Builder"}</h2>
+        {#if dirty}<span class="dirty-dot" title="Unsaved changes"></span>{/if}
       </div>
       <div class="top-actions">
         {#if view === "config"}
