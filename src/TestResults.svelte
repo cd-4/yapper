@@ -131,13 +131,6 @@
                         </div>
                       {/each}
                     </div>
-                    {#if test.file_path}
-                      <div class="test-actions">
-                        <button class="action-link" on:click={() => navigate(test)}>
-                          ↗ Go to test
-                        </button>
-                      </div>
-                    {/if}
                   </div>
                 {/if}
               </div>
@@ -152,6 +145,7 @@
   <button
     class="results-bar"
     class:has-failures={runResult && failedTests.length > 0}
+    class:all-passed={runResult && failedTests.length === 0}
     on:click={() => { if (runResult) detailOpen = !detailOpen; }}
     disabled={!runResult}
   >
@@ -302,6 +296,8 @@
   .bar-chevron.open { transform: rotate(-90deg); }
 
   .bar-label { font-size: 12px; font-weight: 500; color: #3d2f6e; }
+  .has-failures .bar-label { color: #c2415d; }
+  .all-passed .bar-label { color: #217a63; }
 
   .bar-command { font-size: 11px; font-family: monospace; color: #8b7aaa; flex: 1; }
 
