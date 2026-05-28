@@ -937,6 +937,52 @@
     return null;
   }
 
+  async function saveAll() {
+    const toSave: Record<string, TestDraft> = {};
+
+    for (const [key, { draft: d }] of Object.entries(dirtyDrafts)) {
+      toSave[key] = d;
+    }
+    if (editingTest && dirty) {
+      toSave[selectedTestKey] = draft;
+    }
+
+    if (Object.keys(toSave).length === 0) return;
+
+    const byFile = new Map<string, Map<string, TestDraft>>();
+    for (const [key, d] of Object.entries(toSave)) {
+      const hashIdx = key.indexOf("#");
+      const filePath = key.slice(0, hashIdx);
+      const testName = key.slice(hashIdx + 1);
+      if (!byFile.has(filePath)) byFile.set(filePath, new Map());
+      byFile.get(filePath)!.set(testName, d);
+    }
+
+    for (const [filePath, tests] of byFile) {
+      let contents = await call<string>("read_yaml_file", {
+        root: rootPath.trim(),
+        relativePath: filePath,
+      });
+      for (const [testName, testDraft] of tests) {
+        const updated = replaceTestDraft(contents, testName, testDraft);
+        if (updated) contents = updated;
+      }
+      await call("write_yaml_file", {
+        root: rootPath.trim(),
+        relativePath: filePath,
+        contents,
+      });
+    }
+
+    dirtyDrafts = {};
+    if (editingTest && dirty) {
+      editor = buildTestYaml(draft);
+      original = editor;
+    }
+    await scan();
+    message = "Saved all";
+  }
+
   function showBuilder() {
     if (editingTest) {
       if (view === "yaml") {
@@ -1513,6 +1559,24 @@
         </button>
         <button
           class="icon-button rail-button"
+          on:click={saveDraft}
+          disabled={!editingTest || !dirty || busy || !rootPath}
+          aria-label="Save test"
+          title="Save test"
+        >
+          <Save size={18} />
+        </button>
+        <button
+          class="icon-button rail-button"
+          on:click={saveAll}
+          disabled={allDirtyTestKeys.size === 0 || busy || !rootPath}
+          aria-label="Save all"
+          title="Save all"
+        >
+          <SaveAll size={18} />
+        </button>
+        <button
+          class="icon-button rail-button"
           on:click={chooseRoot}
           disabled={busy}
           aria-label="Open project"
@@ -1546,12 +1610,49 @@
           <PanelLeftClose size={18} />
         </button>
       </div>
+      <div class="sidebar-toolbar">
+        <button
+          class="icon-button"
+          on:click={chooseRoot}
+          disabled={busy}
+          aria-label="Open project"
+          title="Open project"
+        >
+          <FolderOpen size={18} />
+        </button>
+        <button
+          class="icon-button"
+          on:click={saveDraft}
+          disabled={!editingTest || !dirty || busy || !rootPath}
+          aria-label="Save test"
+          title="Save test"
+        >
+          <Save size={18} />
+        </button>
+        <button
+          class="icon-button"
+          on:click={saveAll}
+          disabled={allDirtyTestKeys.size === 0 || busy || !rootPath}
+          aria-label="Save all"
+          title="Save all"
+        >
+          <SaveAll size={18} />
+        </button>
+        <button
+          class="icon-button run-button"
+          on:click={runCurrentTest}
+          on:contextmenu={openRunMenu}
+          disabled={busy || !rootPath}
+          aria-label="Run current test"
+          title="Run current test"
+        >
+          <Play size={18} />
+        </button>
+      </div>
     {/if}
 
     {#if !sidebarCollapsed || collapsedTreeOpen}
       <div class="sidebar-body" class:tree-popout={sidebarCollapsed}>
-        <button class="open-root-button" on:click={chooseRoot} disabled={busy}>Open</button>
-
         <input class="search" bind:value={filter} placeholder="Filter YAML files" />
 
         <nav class="file-tree" aria-label="YAML files">

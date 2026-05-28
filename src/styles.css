@@ -517,6 +517,14 @@ textarea {
   min-width: 0;
 }
 
+.sidebar-toolbar {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
 .sidebar-body {
   display: flex;
   flex: 1;
