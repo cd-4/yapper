@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="YapperLogo.png" alt="Yapper Logo" width="200" />
+  <img src="YapperLogoAlpha.png" alt="Yapper Logo" width="200" />
 </p>
 
 <h1 align="center">Yapper</h1>
