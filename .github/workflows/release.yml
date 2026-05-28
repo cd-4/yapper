@@ -56,6 +56,6 @@ jobs:
         with:
           tagName: v${{ inputs.version }}
           releaseName: 'Yapper v${{ inputs.version }}'
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
