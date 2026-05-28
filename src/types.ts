@@ -11,11 +11,26 @@ export type DirectoryEntry = {
   name: string;
 };
 
+export type AssertionResult = {
+  name: string;
+  passed: boolean;
+  message: string | null;
+};
+
+export type TestResultItem = {
+  name: string;
+  passed: boolean;
+  file_path: string | null;
+  duration_ms: number;
+  failure_message: string | null;
+  assertions: AssertionResult[];
+};
+
 export type RunResult = {
   command: string;
   status: number | null;
-  stdout: string;
-  stderr: string;
+  elapsed_ms: number;
+  tests: TestResultItem[];
 };
 
 export type GitStatus = {

@@ -41,11 +41,28 @@ struct DirectoryEntry {
 }
 
 #[derive(Serialize)]
+struct AssertionData {
+    name: String,
+    passed: bool,
+    message: Option<String>,
+}
+
+#[derive(Serialize)]
+struct TestResultData {
+    name: String,
+    passed: bool,
+    file_path: Option<String>,
+    duration_ms: u64,
+    failure_message: Option<String>,
+    assertions: Vec<AssertionData>,
+}
+
+#[derive(Serialize)]
 struct RunResult {
     command: String,
     status: Option<i32>,
-    stdout: String,
-    stderr: String,
+    elapsed_ms: u64,
+    tests: Vec<TestResultData>,
 }
 
 #[derive(Serialize)]
@@ -597,41 +614,218 @@ step-sets:
     Ok(())
 }
 
+/// Collect all config files from the test file's directory up to root.
+/// Returns them ordered farthest-first so they can be merged with closer
+/// configs overriding farther ones.
+fn collect_configs(root: &Path, relative_path: Option<&str>) -> Vec<String> {
+    const CONFIG_NAMES: &[&str] = &[
+        "config.yaml", "config.yml",
+        "yapitest-config.yaml", "yapitest-config.yml",
+    ];
+
+    let canonical_root = match fs::canonicalize(root) {
+        Ok(p) => p,
+        Err(_) => return vec![],
+    };
+
+    let raw_start = relative_path
+        .and_then(|p| Path::new(p).parent())
+        .map(|parent| root.join(parent))
+        .unwrap_or_else(|| root.to_path_buf());
+
+    let start = match fs::canonicalize(&raw_start) {
+        Ok(p) => p,
+        Err(_) => return vec![],
+    };
+
+    if !start.starts_with(&canonical_root) {
+        return vec![];
+    }
+
+    // Walk closest → farthest, collecting one config per directory.
+    let mut results: Vec<String> = vec![];
+    let mut dir = start.as_path();
+    loop {
+        for name in CONFIG_NAMES {
+            let candidate = dir.join(name);
+            if candidate.exists() {
+                if let Ok(content) = fs::read_to_string(&candidate) {
+                    results.push(content);
+                    break;
+                }
+            }
+        }
+        if dir == canonical_root {
+            break;
+        }
+        match dir.parent() {
+            Some(p) if p.starts_with(&canonical_root) || p == canonical_root => dir = p,
+            _ => break,
+        }
+    }
+
+    results.reverse(); // farthest → closest, so merging applies closer values last
+    results
+}
+
+/// Deep-merge two YAML mappings. `closer` wins over `base` for any key both define.
+fn merge_yaml(base: serde_yaml::Value, closer: serde_yaml::Value) -> serde_yaml::Value {
+    use serde_yaml::Value;
+    match (base, closer) {
+        (Value::Mapping(mut base_map), Value::Mapping(closer_map)) => {
+            for (key, value) in closer_map {
+                let existing = base_map.remove(&key);
+                base_map.insert(key, match existing {
+                    Some(ev) => merge_yaml(ev, value),
+                    None => value,
+                });
+            }
+            Value::Mapping(base_map)
+        }
+        (_, closer) => closer,
+    }
+}
+
 #[tauri::command]
-fn run_yapitest(
+async fn run_yapitest_content(
+    root: String,
+    content: String,
+    test_name: Option<String>,
+    relative_path: Option<String>,
+) -> AppResult<RunResult> {
+    let root = normalize_root(&root)?;
+    let name_filter = test_name.filter(|v| !v.trim().is_empty());
+    let known_path = relative_path.filter(|v| !v.trim().is_empty());
+
+    let mut display = match &known_path {
+        Some(p) => format!("yapitest {p}"),
+        None => String::from("yapitest"),
+    };
+    if let Some(ref name) = name_filter {
+        display.push_str(" -k ");
+        display.push_str(name);
+    }
+
+    let config_contents = collect_configs(&root, known_path.as_deref());
+
+    let start = std::time::Instant::now();
+    let mut results = tauri::async_runtime::spawn_blocking(move || -> AppResult<Vec<yapitest::TestResult>> {
+        let tests_val: serde_yaml::Value = serde_yaml::from_str(&content)
+            .map_err(|e| AppError::Message(format!("Invalid YAML: {e}")))?;
+        let config_val = config_contents
+            .into_iter()
+            .filter_map(|c| serde_yaml::from_str::<serde_yaml::Value>(&c).ok())
+            .reduce(merge_yaml);
+        let rt = tokio::runtime::Runtime::new()
+            .map_err(|e| AppError::Message(e.to_string()))?;
+        rt.block_on(yapitest::run_from_yaml(tests_val, config_val))
+            .map_err(|e| AppError::Message(e.to_string()))
+    })
+    .await
+    .map_err(|e| AppError::Message(e.to_string()))??;
+    let elapsed_ms = start.elapsed().as_millis() as u64;
+
+    if let Some(ref filter) = name_filter {
+        results.retain(|r: &yapitest::TestResult| r.name().contains(filter.as_str()));
+    }
+
+    let all_passed = results.iter().all(|r| r.passed());
+
+    let tests = results
+        .iter()
+        .map(|r| TestResultData {
+            name: r.name().to_string(),
+            passed: r.passed(),
+            file_path: known_path.clone(),
+            duration_ms: r.duration_ms,
+            failure_message: r.get_failure_message().map(str::to_string),
+            assertions: r
+                .assertions()
+                .map(|a| AssertionData {
+                    name: a.name.clone(),
+                    passed: a.passed,
+                    message: a.message.clone(),
+                })
+                .collect(),
+        })
+        .collect();
+
+    Ok(RunResult {
+        command: display,
+        status: Some(if all_passed { 0 } else { 1 }),
+        elapsed_ms,
+        tests,
+    })
+}
+
+#[tauri::command]
+async fn run_yapitest(
     root: String,
     target: Option<String>,
     test_name: Option<String>,
 ) -> AppResult<RunResult> {
     let root = normalize_root(&root)?;
-    let mut command = Command::new("yapitest");
-    command.current_dir(&root);
+
+    let target = target.filter(|v| !v.trim().is_empty());
+    let name_filter = test_name.filter(|v| !v.trim().is_empty());
 
     let mut display = String::from("yapitest");
-    if let Some(target) = target.filter(|value| !value.trim().is_empty()) {
-        let path = safe_join(&root, &target)?;
-        command.arg(path);
-        display.push(' ');
-        display.push_str(&target);
-    }
+    let path = match &target {
+        Some(t) => {
+            display.push(' ');
+            display.push_str(t);
+            safe_join(&root, t)?
+        }
+        None => root.clone(),
+    };
 
-    if let Some(test_name) = test_name.filter(|value| !value.trim().is_empty()) {
-        command.args(["-k", &test_name]);
+    if let Some(ref name) = name_filter {
         display.push_str(" -k ");
-        display.push_str(&test_name);
+        display.push_str(name);
     }
 
-    let output = command.output().map_err(|error| {
-        AppError::Message(format!(
-            "Could not run yapitest. Install it with `pip install yapitest`. Details: {error}"
-        ))
-    })?;
+    let start = std::time::Instant::now();
+    let mut results = tauri::async_runtime::spawn_blocking(move || {
+        yapitest::run_path_blocking(&path)
+    })
+    .await
+    .map_err(|e| AppError::Message(e.to_string()))?
+    .map_err(|e| AppError::Message(e.to_string()))?;
+    let elapsed_ms = start.elapsed().as_millis() as u64;
+
+    if let Some(ref filter) = name_filter {
+        results.retain(|r: &yapitest::TestResult| r.name().contains(filter.as_str()));
+    }
+
+    let all_passed = results.iter().all(|r| r.passed());
+
+    let tests = results
+        .iter()
+        .map(|r| TestResultData {
+            name: r.name().to_string(),
+            passed: r.passed(),
+            file_path: r
+                .file_path()
+                .and_then(|p| p.strip_prefix(&root).ok())
+                .map(|p| p.to_string_lossy().into_owned()),
+            duration_ms: r.duration_ms,
+            failure_message: r.get_failure_message().map(str::to_string),
+            assertions: r
+                .assertions()
+                .map(|a| AssertionData {
+                    name: a.name.clone(),
+                    passed: a.passed,
+                    message: a.message.clone(),
+                })
+                .collect(),
+        })
+        .collect();
 
     Ok(RunResult {
         command: display,
-        status: output.status.code(),
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        status: Some(if all_passed { 0 } else { 1 }),
+        elapsed_ms,
+        tests,
     })
 }
 
@@ -674,6 +868,7 @@ pub fn run() {
             delete_path,
             create_sample_project,
             run_yapitest,
+            run_yapitest_content,
             git_status,
             load_ui_state,
             save_ui_state,

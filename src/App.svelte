@@ -17,10 +17,12 @@
     Play,
     Plus,
     Save,
+    SaveAll,
     Trash2,
     X,
   } from "lucide-svelte";
   import StepEditor from "./StepEditor.svelte";
+  import TestResults from "./TestResults.svelte";
   import ThemedSelect from "./ThemedSelect.svelte";
   import {
     buildConfigYaml,
@@ -55,6 +57,7 @@
   };
 
   let rootPath = "";
+  let dirtyDrafts: Record<string, { draft: TestDraft; original: string }> = {};
   let projects: ProjectEntry[] = [];
   let directories: DirectoryEntry[] = [];
   let files: FileEntry[] = [];
@@ -63,7 +66,7 @@
   let selectedTestKey = "";
   let editor = "";
   let original = "";
-  let output = "";
+  let testRunning = false;
   let runResult: RunResult | null = null;
   let busy = false;
   let message = "";
@@ -76,6 +79,7 @@
   let sidebarCollapsed = false;
   let isMac = navigator.platform.toLowerCase().includes("mac");
   let collapsedTreeOpen = false;
+  let workspaceContent: HTMLDivElement;
   let runMenu = { open: false, left: 0, top: 0 };
   let editingTest: { file: FileEntry; originalName: string } | null = null;
   let treeMenu:
@@ -139,7 +143,12 @@
       !filter.trim() || directory.relative_path.toLowerCase().includes(filter.toLowerCase()),
   );
   $: treeRows = buildTreeRows(filteredFiles, filteredDirectories, expandedTree);
-  $: dirty = editor !== original;
+  $: dirty = editingTest ? generatedYaml !== original : editor !== original;
+  $: allDirtyTestKeys = new Set([
+    ...Object.keys(dirtyDrafts),
+    ...(dirty && editingTest ? [selectedTestKey] : []),
+  ]);
+  $: allDirtyFilePaths = new Set([...allDirtyTestKeys].map(k => k.split('#')[0]));
   $: generatedYaml = buildTestYaml(draft);
   $: generatedConfigYaml = buildConfigYaml(configDraft);
   $: suggestions = view === "config" ? buildConfigSuggestions(configDraft, catalog) : buildSuggestions(draft, catalog);
@@ -250,6 +259,7 @@
 
   async function loadProject(path: string, savedState: UiState | null = null) {
     rootPath = path;
+    dirtyDrafts = {};
     treeMenu = { type: "none", left: 0, top: 0 };
     selected = null;
     selectedRelativePath = "";
@@ -411,12 +421,53 @@
     void runYapitest(path);
   }
 
-  function runFile(file: FileEntry) {
-    void runYapitest(file.relative_path);
+  async function runFile(file: FileEntry) {
+    const dirtyTests: Record<string, TestDraft> = {};
+    for (const name of file.tests) {
+      const key = `${file.relative_path}#${name}`;
+      if (key === selectedTestKey && dirty && editingTest) {
+        dirtyTests[name] = draft;
+      } else if (key in dirtyDrafts) {
+        dirtyTests[name] = dirtyDrafts[key].draft;
+      }
+    }
+    if (Object.keys(dirtyTests).length === 0) {
+      void runYapitest(file.relative_path);
+      return;
+    }
+    let contents = await call<string>("read_yaml_file", { root: rootPath.trim(), relativePath: file.relative_path });
+    for (const [name, testDraft] of Object.entries(dirtyTests)) {
+      contents = replaceTestDraft(contents, name, testDraft) ?? contents;
+    }
+    testRunning = true;
+    runResult = null;
+    runResult = await call<RunResult>("run_yapitest_content", {
+      root: rootPath.trim(),
+      content: contents,
+      testName: null,
+      relativePath: file.relative_path,
+    });
+    testRunning = false;
   }
 
-  function runTreeTest(file: FileEntry, testName: string) {
-    void runYapitest(file.relative_path, testName);
+  async function runTreeTest(file: FileEntry, testName: string) {
+    const key = `${file.relative_path}#${testName}`;
+    const isCurrentDirty = key === selectedTestKey && dirty && editingTest;
+    const savedDirty = !isCurrentDirty && key in dirtyDrafts ? dirtyDrafts[key] : null;
+    if (!isCurrentDirty && !savedDirty) {
+      void runYapitest(file.relative_path, testName);
+      return;
+    }
+    const testDraft = isCurrentDirty ? draft : savedDirty!.draft;
+    testRunning = true;
+    runResult = null;
+    runResult = await call<RunResult>("run_yapitest_content", {
+      root: rootPath.trim(),
+      content: buildTestYaml(testDraft),
+      testName: testDraft.testName.trim() || testName,
+      relativePath: file.relative_path,
+    });
+    testRunning = false;
   }
 
   function runProject(path: string) {
@@ -661,6 +712,9 @@
       original = "";
     }
 
+    dirtyDrafts = Object.fromEntries(
+      Object.entries(dirtyDrafts).filter(([k]) => !k.startsWith(path + '#') && !k.startsWith(path + '/'))
+    );
     await refreshRepositoryTree();
     if (!selected && files.length > 0) await selectFile(files[0]);
     else if (!selected) saveUiState({ relativePath: null, testName: null });
@@ -696,6 +750,11 @@
       editor = "";
       original = "";
     }
+    const deletedKey = `${file.relative_path}#${testName}`;
+    if (deletedKey in dirtyDrafts) {
+      const { [deletedKey]: _, ...remaining } = dirtyDrafts;
+      dirtyDrafts = remaining;
+    }
 
     await refreshRepositoryTree();
     const updatedFile = files.find((item) => item.relative_path === file.relative_path);
@@ -726,10 +785,33 @@
   }
 
   async function selectTest(file: FileEntry, testName: string) {
+    const newKey = `${file.relative_path}#${testName}`;
+
+    // Save dirty state before navigating away
+    if (editingTest && dirty && selectedTestKey !== newKey) {
+      dirtyDrafts = {
+        ...dirtyDrafts,
+        [selectedTestKey]: { draft: JSON.parse(JSON.stringify(draft)) as TestDraft, original },
+      };
+    }
+
     selectFromCollapsedTree();
     selected = file;
     selectedRelativePath = file.relative_path;
-    selectedTestKey = `${file.relative_path}#${testName}`;
+    selectedTestKey = newKey;
+
+    // Restore a previously saved dirty draft if one exists
+    const saved = dirtyDrafts[newKey];
+    if (saved) {
+      draft = saved.draft;
+      editingTest = { file, originalName: testName };
+      editor = buildTestYaml(draft);
+      original = saved.original;
+      view = "builder";
+      saveUiState({ rootPath, relativePath: file.relative_path, testName });
+      return;
+    }
+
     const contents = await call<string>("read_yaml_file", {
       root: rootPath.trim(),
       relativePath: file.relative_path,
@@ -748,11 +830,7 @@
     editor = buildTestYaml(parsed);
     original = editor;
     view = "builder";
-    saveUiState({
-      rootPath,
-      relativePath: file.relative_path,
-      testName,
-    });
+    saveUiState({ rootPath, relativePath: file.relative_path, testName });
   }
 
   async function refreshCatalog() {
@@ -815,6 +893,7 @@
 
   async function saveDraft() {
     if (editingTest) {
+      const keyBeforeSave = selectedTestKey;
       const contents = await call<string>("read_yaml_file", {
         root: rootPath.trim(),
         relativePath: editingTest.file.relative_path,
@@ -841,6 +920,10 @@
       editor = buildTestYaml(draft);
       original = editor;
       view = "builder";
+      if (keyBeforeSave in dirtyDrafts) {
+        const { [keyBeforeSave]: _, ...remaining } = dirtyDrafts;
+        dirtyDrafts = remaining;
+      }
       saveUiState({
         rootPath,
         relativePath: activeFilePath,
@@ -854,7 +937,61 @@
     return null;
   }
 
+  async function saveAll() {
+    const toSave: Record<string, TestDraft> = {};
+
+    for (const [key, { draft: d }] of Object.entries(dirtyDrafts)) {
+      toSave[key] = d;
+    }
+    if (editingTest && dirty) {
+      toSave[selectedTestKey] = draft;
+    }
+
+    if (Object.keys(toSave).length === 0) return;
+
+    const byFile = new Map<string, Map<string, TestDraft>>();
+    for (const [key, d] of Object.entries(toSave)) {
+      const hashIdx = key.indexOf("#");
+      const filePath = key.slice(0, hashIdx);
+      const testName = key.slice(hashIdx + 1);
+      if (!byFile.has(filePath)) byFile.set(filePath, new Map());
+      byFile.get(filePath)!.set(testName, d);
+    }
+
+    for (const [filePath, tests] of byFile) {
+      let contents = await call<string>("read_yaml_file", {
+        root: rootPath.trim(),
+        relativePath: filePath,
+      });
+      for (const [testName, testDraft] of tests) {
+        const updated = replaceTestDraft(contents, testName, testDraft);
+        if (updated) contents = updated;
+      }
+      await call("write_yaml_file", {
+        root: rootPath.trim(),
+        relativePath: filePath,
+        contents,
+      });
+    }
+
+    dirtyDrafts = {};
+    if (editingTest && dirty) {
+      editor = buildTestYaml(draft);
+      original = editor;
+    }
+    await scan();
+    message = "Saved all";
+  }
+
   function showBuilder() {
+    if (editingTest) {
+      if (view === "yaml") {
+        const parsed = parseTestDraft(editor, draft.testName) ?? parseTestDraft(editor, editingTest.originalName);
+        if (parsed) draft = parsed;
+      }
+      view = "builder";
+      return;
+    }
     const activeFile = selected || files.find((file) => file.relative_path === currentUiState().relativePath);
     if (activeFile?.kind === "config") {
       selected = activeFile;
@@ -872,9 +1009,17 @@
     view = "builder";
   }
 
+  async function saveYamlDraft() {
+    if (!editingTest) return;
+    const parsed = parseTestDraft(editor, draft.testName) ?? parseTestDraft(editor, editingTest.originalName);
+    if (parsed) draft = parsed;
+    await saveDraft();
+  }
+
   async function showYaml() {
     if (editingTest) {
-      await selectFile(editingTest.file);
+      editor = generatedYaml;
+      view = "yaml";
       return;
     }
     view = "yaml";
@@ -969,19 +1114,39 @@
   }
 
   async function runYapitest(target?: string, testName?: string, rootOverride?: string) {
-    output = "Running yapitest...\n";
+    testRunning = true;
+    runResult = null;
     runResult = await call<RunResult>("run_yapitest", {
       root: (rootOverride || rootPath).trim(),
       target: target || null,
       testName: testName || null,
     });
-    output = [runResult.command, "", runResult.stdout, runResult.stderr].filter(Boolean).join("\n");
+    testRunning = false;
+  }
+
+  function handleNavigate(e: CustomEvent<{ filePath: string; testName: string }>) {
+    const file = files.find((f) => f.relative_path === e.detail.filePath);
+    if (file) {
+      void selectTest(file, e.detail.testName).then(() => {
+        workspaceContent?.scrollTo({ top: 0, behavior: "smooth" });
+      });
+    }
   }
 
   async function runDraft() {
-    const relativePath = await saveDraft();
-    if (!relativePath) return;
-    await runYapitest(relativePath, draft.testName.trim() || "new-api-test");
+    if (!rootPath) {
+      message = "Open a project before running it.";
+      return;
+    }
+    testRunning = true;
+    runResult = null;
+    runResult = await call<RunResult>("run_yapitest_content", {
+      root: rootPath.trim(),
+      content: view === "builder" ? generatedYaml : editor,
+      testName: view === "builder" ? (draft.testName.trim() || null) : null,
+      relativePath: editingTest?.file.relative_path ?? null,
+    });
+    testRunning = false;
   }
 
   async function runCurrentTest() {
@@ -1344,8 +1509,7 @@
       aria-label="Move window"
     >
       <span class="titlebar-brand">
-        <span class="titlebar-mark">B</span>
-        <span>Yapper</span>
+        <img src="/YapperLogoAlpha.png" alt="Yapper" class="titlebar-logo" />
       </span>
       <span class="titlebar-context">
         {#if rootPath}
@@ -1374,7 +1538,7 @@
   <aside class="sidebar" aria-label="Repository browser">
     {#if sidebarCollapsed}
       <div class="collapsed-rail">
-        <span class="rail-mark" aria-hidden="true">B</span>
+        <img src="/YapperLogoAlpha.png" alt="" class="rail-logo" aria-hidden="true" />
         <button
           class="icon-button rail-button"
           on:click={() => setSidebarCollapsed(false)}
@@ -1392,6 +1556,24 @@
           title="Run current test"
         >
           <Play size={18} />
+        </button>
+        <button
+          class="icon-button rail-button"
+          on:click={saveDraft}
+          disabled={!editingTest || !dirty || busy || !rootPath}
+          aria-label="Save test"
+          title="Save test"
+        >
+          <Save size={18} />
+        </button>
+        <button
+          class="icon-button rail-button"
+          on:click={saveAll}
+          disabled={allDirtyTestKeys.size === 0 || busy || !rootPath}
+          aria-label="Save all"
+          title="Save all"
+        >
+          <SaveAll size={18} />
         </button>
         <button
           class="icon-button rail-button"
@@ -1415,7 +1597,6 @@
     {:else}
       <div class="sidebar-head">
         <div class="brand">
-          <span class="mark">B</span>
           <div>
             <h1>Yapper</h1>
           </div>
@@ -1429,12 +1610,49 @@
           <PanelLeftClose size={18} />
         </button>
       </div>
+      <div class="sidebar-toolbar">
+        <button
+          class="icon-button"
+          on:click={chooseRoot}
+          disabled={busy}
+          aria-label="Open project"
+          title="Open project"
+        >
+          <FolderOpen size={18} />
+        </button>
+        <button
+          class="icon-button"
+          on:click={saveDraft}
+          disabled={!editingTest || !dirty || busy || !rootPath}
+          aria-label="Save test"
+          title="Save test"
+        >
+          <Save size={18} />
+        </button>
+        <button
+          class="icon-button"
+          on:click={saveAll}
+          disabled={allDirtyTestKeys.size === 0 || busy || !rootPath}
+          aria-label="Save all"
+          title="Save all"
+        >
+          <SaveAll size={18} />
+        </button>
+        <button
+          class="icon-button run-button"
+          on:click={runCurrentTest}
+          on:contextmenu={openRunMenu}
+          disabled={busy || !rootPath}
+          aria-label="Run current test"
+          title="Run current test"
+        >
+          <Play size={18} />
+        </button>
+      </div>
     {/if}
 
     {#if !sidebarCollapsed || collapsedTreeOpen}
       <div class="sidebar-body" class:tree-popout={sidebarCollapsed}>
-        <button class="open-root-button" on:click={chooseRoot} disabled={busy}>Open</button>
-
         <input class="search" bind:value={filter} placeholder="Filter YAML files" />
 
         <nav class="file-tree" aria-label="YAML files">
@@ -1563,6 +1781,7 @@
                           on:dblclick|stopPropagation={() => startTreeRename(row.key)}
                         >
                           <span>{row.name}</span>
+                          {#if !row.expanded && [...allDirtyFilePaths].some(p => p.startsWith(row.key + '/'))}<span class="dirty-dot"></span>{/if}
                         </button>
                       {/if}
                       <button
@@ -1627,12 +1846,13 @@
                           on:dblclick|stopPropagation={() => startTreeRename(row.file.relative_path)}
                         >
                           <span>{row.file.name}</span>
+                          {#if allDirtyFilePaths.has(row.file.relative_path) && !row.expanded}<span class="dirty-dot"></span>{/if}
                         </button>
                       {/if}
                       {#if row.file.kind === "test"}
                         <button
                           class="tree-run-button"
-                          on:click|stopPropagation={() => runFile(row.file)}
+                          on:click|stopPropagation={() => void runFile(row.file)}
                           disabled={busy || !rootPath}
                           aria-label={`Run ${row.file.name}`}
                           title={`Run ${row.file.name}`}
@@ -1654,10 +1874,11 @@
                       <span class="tree-test-dot"></span>
                       <button class="tree-label" on:click={() => selectTest(row.file, row.name)}>
                         <span>{row.name}</span>
+                        {#if allDirtyTestKeys.has(row.key)}<span class="dirty-dot"></span>{/if}
                       </button>
                       <button
                         class="tree-run-button"
-                        on:click|stopPropagation={() => runTreeTest(row.file, row.name)}
+                        on:click|stopPropagation={() => void runTreeTest(row.file, row.name)}
                         disabled={busy || !rootPath}
                         aria-label={`Run ${row.name}`}
                         title={`Run ${row.name}`}
@@ -1738,15 +1959,16 @@
   </aside>
 
   <section class="workspace">
+    <div class="workspace-content" bind:this={workspaceContent}>
     <header class="topbar">
-      <div>
+      <div class="topbar-title">
         <h2>{selected ? selected.relative_path : "Request Builder"}</h2>
+        {#if dirty}<span class="dirty-dot" title="Unsaved changes"></span>{/if}
       </div>
       <div class="top-actions">
         {#if view === "config"}
           <button on:click={save} disabled={!selected || busy}>Save Config</button>
         {/if}
-        <button on:click={runDraft} disabled={busy || !rootPath}>Run Draft</button>
         <div class="tabs">
           <button class:active={view === "builder" || view === "config"} on:click={showBuilder}>Builder</button>
           <button class:active={view === "yaml"} on:click={showYaml}>YAML</button>
@@ -2044,26 +2266,25 @@
     {:else}
       <section class="editor-pane">
         <div class="editor-actions">
-          <button on:click={selected ? save : saveDraft} disabled={busy || (!selected && !rootPath) || (selected && !dirty)}>
-            Save
-          </button>
-          <button on:click={() => selected && runYapitest(selected.relative_path)} disabled={!selected || busy}>
-            Run File
-          </button>
+          {#if editingTest}
+            <button on:click={saveYamlDraft} disabled={busy || !dirty}>Save</button>
+          {:else}
+            <button on:click={selected ? save : saveDraft} disabled={busy || (!selected && !rootPath) || (selected && !dirty)}>
+              Save
+            </button>
+            <button on:click={() => selected && runYapitest(selected.relative_path)} disabled={!selected || busy}>
+              Run File
+            </button>
+          {/if}
         </div>
         <textarea class="editor" bind:value={editor} spellcheck="false"></textarea>
       </section>
     {/if}
 
-    <section class="console">
-      <div>
-        <h3>Run Output</h3>
-        {#if runResult}
-          <span class:fail={runResult.status !== 0}>exit {runResult.status ?? "unknown"}</span>
-        {/if}
-      </div>
-      <pre>{output || "No yapitest run yet."}</pre>
-    </section>
+    </div>
+    {#if runResult || testRunning}
+      <TestResults {runResult} running={testRunning} on:navigate={handleNavigate} />
+    {/if}
   </section>
 </main>
 </div>
